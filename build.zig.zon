@@ -1,0 +1,35 @@
+.{
+    // This package is the Zig packaging of spglib v2.7.0. Consumers import the
+    // `spglib` module; see README.zig.md.
+    .name = .spglib,
+    // Must stay equal to the pinned upstream release recorded in UPSTREAM.md.
+    // build.zig refuses to configure when the two drift apart.
+    .version = "2.7.0",
+    // Value reported by the toolchain for this package name.
+    .fingerprint = 0x35191367c8f3aeca, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.16.0",
+    // No `.dependencies`. The consumer package in zig/consumer has its own
+    // manifest and depends on this package by path, so depending on it here
+    // would close a cycle. `zig build consumer` invokes it as its own build
+    // instead; see build.zig's runConsumer.
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        // The Zig facade, tests, example and consumer package.
+        "zig",
+        // Upstream C core, public header and the version.h template.
+        "src",
+        "include",
+        // Upstream licence and provenance records.
+        "COPYING",
+        "UPSTREAM.md",
+        "NOTICE.md",
+        "CHANGELOG.md",
+        "README.md",
+        "README.zig.md",
+        "FORK-NOTES.md",
+        // Licence and provenance gate used by the fork CI.
+        "tools",
+        "patches",
+    },
+}

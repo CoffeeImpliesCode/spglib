@@ -1,0 +1,15 @@
+--- a/src/primitive.c
++++ b/src/primitive.c
+@@ -243,8 +243,10 @@ static Primitive *get_primitive(Cell const *cell, double const symprec,
+             }
+         }
+ 
+-        mat_free_VecDBL(pure_trans);
+-        pure_trans = NULL;
++        if (pure_trans != NULL) {
++            mat_free_VecDBL(pure_trans);
++            pure_trans = NULL;
++        }
+ 
+         tolerance *= REDUCE_RATE;
+         debug_print("spglib: Reduce tolerance to %f ", tolerance);

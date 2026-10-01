@@ -1,0 +1,94 @@
+name: Zig fork CI
+
+# The only workflow in this repository, and it belongs to the downstream fork.
+#
+# Every step below is a command this package defines: a `zig build` step from
+# `build.zig`, the `zig/consumer` run, or `tools/check_provenance.sh`. The
+# upstream workflows that arrived with the import were removed rather than
+# carried, because two of them publish this fork's builds to the upstream PyPI
+# project and Codecov account; `CHANGELOG.md` entry 7 names them.
+#
+# What this workflow deliberately does not run: `-fsys=spglib`, because the
+# runner has no installed spglib to link. The cross job compiles the six
+# targets and executes none of them, because a cross-compiled binary cannot run
+# on the runner.
+#
+# A green result here is a statement about this repository only. It says
+# nothing about whether anything has been published to any remote.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ZIG_VERSION: "0.16.0"
+
+jobs:
+  provenance:
+    name: licence and provenance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check licence, SPDX identifiers and pinned sources
+        run: ./tools/check_provenance.sh
+
+  native:
+    name: build, test and smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Formatting
+        run: zig build fmt-check
+      - name: Build and install
+        run: zig build
+      - name: Tests in Debug
+        run: zig build test -Doptimize=Debug
+      - name: Tests in ReleaseSafe
+        run: zig build test -Doptimize=ReleaseSafe
+      - name: Smoke example
+        run: zig build smoke
+      - name: Compile-only analysis
+        run: zig build check
+      - name: Build steps available in this package
+        run: zig build --list-steps
+
+  cross:
+    name: six-target compile check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      # Compiles the library, the whole public facade and the example for each
+      # target. Nothing is executed: cross-compiled binaries cannot run here.
+      - name: Compile the public surface for every supported target
+        run: zig build check-targets
+
+  consumer:
+    name: downstream consumer package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Build and run the consumer on its own
+        working-directory: zig/consumer
+        run: zig build run
+      - name: Build the consumer through the root step
+        run: zig build consumer

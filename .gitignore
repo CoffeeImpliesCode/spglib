@@ -83,3 +83,8 @@ venv
 env
 .venv
 .env
+
+# Zig build (fork additions, upstream conventions kept above)
+.zig-cache/
+zig-cache/
+zig-out/

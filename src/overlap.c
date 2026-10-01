@@ -464,9 +464,9 @@ static OverlapChecker *overlap_checker_alloc(int size) {
     offset_pos_temp_1 = SPG_POST_INCREMENT(offset, size * sizeof(double[3]));
     offset_pos_temp_2 = SPG_POST_INCREMENT(offset, size * sizeof(double[3]));
     offset_distance_temp = SPG_POST_INCREMENT(offset, size * sizeof(double));
-    offset_perm_temp = SPG_POST_INCREMENT(offset, size * sizeof(int));
     offset_lattice = SPG_POST_INCREMENT(offset, 9 * sizeof(double));
     offset_pos_sorted = SPG_POST_INCREMENT(offset, size * sizeof(double[3]));
+    offset_perm_temp = SPG_POST_INCREMENT(offset, size * sizeof(int));
     offset_types_sorted = SPG_POST_INCREMENT(offset, size * sizeof(int));
     offset_periodic_axes = SPG_POST_INCREMENT(offset, 3 * sizeof(int));
     blob_size = offset;
