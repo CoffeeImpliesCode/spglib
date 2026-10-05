@@ -5,15 +5,26 @@
 // handful the other tests happen to call. It is an ordinary test file: natively
 // it runs and checks the values, and for a foreign target it is compiled without
 // running, which is what makes the cross-target check meaningful.
+//
+// ## What a runtime-loading build needs
+//
+// Such a build has no library until `load` has been called, so every test calls
+// `nativeReady()` first. That is a no-op at comptime in a linked build. A
+// runtime-loading build that was not told which provider to use stops with the
+// variable's name rather than reporting a failure that says nothing about the
+// reason.
 
 const std = @import("std");
 
 const spglib = @import("spglib");
 const fixtures = @import("fixtures.zig");
+const provider = @import("provider.zig");
 
+const nativeReady = provider.nativeReady;
 const testing = std.testing;
 
 test "cell helpers report geometry on an oblique cell" {
+    nativeReady();
     const cell = fixtures.perovskite;
     try testing.expectApproxEqAbs(3.905, cell.length(0), 1e-12);
     try testing.expectApproxEqAbs(3.905, cell.length(2), 1e-12);
@@ -45,6 +56,8 @@ test "cell helpers report geometry on an oblique cell" {
 }
 
 test "the space-group type of Hall number 419 matches the upstream table" {
+    nativeReady();
+
     // Every field is pinned by
     // test/functional/fortran/test_fortran_spg_get_spacegroup_type.F90:40-69.
     const sgtype = try spglib.getSpacegroupType(419);
@@ -67,6 +80,8 @@ test "the space-group type of Hall number 419 matches the upstream table" {
 }
 
 test "the space-group type of Hall number 343 matches the upstream table" {
+    nativeReady();
+
     // A second record from the same upstream subtest, whose every field is
     // independently pinned by
     // test/functional/fortran/test_fortran_spg_get_spacegroup_type.F90:82-94
@@ -89,6 +104,8 @@ test "the space-group type of Hall number 343 matches the upstream table" {
 }
 
 test "a dataset reports the setting and origin choice of its type" {
+    nativeReady();
+
     const dataset = try spglib.getDataset(fixtures.rutile, 1e-5);
     defer dataset.deinit();
 
@@ -100,6 +117,8 @@ test "a dataset reports the setting and origin choice of its type" {
 }
 
 test "dataset symbols, matrices and site data are well formed" {
+    nativeReady();
+
     const dataset = try spglib.getDataset(fixtures.bcc, 1e-5);
     defer dataset.deinit();
 
@@ -138,6 +157,8 @@ test "dataset symbols, matrices and site data are well formed" {
 }
 
 test "primitive lattice volume is reported through the cell type" {
+    nativeReady();
+
     const dataset = try spglib.getDataset(fixtures.bcc, 1e-5);
     defer dataset.deinit();
     const primitive = spglib.Cell{
@@ -145,11 +166,16 @@ test "primitive lattice volume is reported through the cell type" {
         .positions = &.{.{ 0, 0, 0 }},
         .types = &.{1},
     };
+    // Body centring halves the cell: the conventional bcc cell holds two atoms
+    // and its primitive cell one, so the primitive lattice has half the volume.
+    // `> 0` would pass for a zero or transposed lattice; the exact ratio does
+    // not.
     try testing.expectApproxEqRel(fixtures.bcc.volume(), 2 * primitive.volume(), 1e-6);
-    try testing.expect(primitive.volume() > 0);
 }
 
 test "magnetic dataset accessors are well formed" {
+    nativeReady();
+
     const dataset = try spglib.getMagneticDataset(fixtures.rutile, &fixtures.rutile_spins.antiferromagnetic, 1e-5);
     defer dataset.deinit();
 
@@ -237,10 +263,21 @@ test "magnetic dataset accessors are well formed" {
         .positions = &.{.{ 0, 0, 0 }},
         .types = &.{1},
     };
-    try testing.expect(primitive.volume() > 0);
+    // Rutile is a P lattice, so its magnetic dataset's primitive cell is the
+    // conventional cell itself and the two must have the same volume. That is
+    // a property of the centring rather than of the accessor, and it is what
+    // makes a zero or transposed lattice visible here: `> 0` would not.
+    const input = spglib.Cell{
+        .lattice = dataset.standardLattice(),
+        .positions = &.{.{ 0, 0, 0 }},
+        .types = &.{1},
+    };
+    try testing.expectApproxEqRel(input.volume(), primitive.volume(), 1e-6);
 }
 
 test "magnetic space-group type carries its numbers" {
+    nativeReady();
+
     // database/msg/msg_numbers.csv records Litvin 1153, BNS 136.496,
     // OG 136.2.1153 at UNI 1156.
     const magnetic_type = try spglib.getMagneticSpacegroupType(1156);
@@ -253,6 +290,8 @@ test "magnetic space-group type carries its numbers" {
 }
 
 test "allocateCell supplies the fourfold headroom the raw standardisation path needs" {
+    nativeReady();
+
     // `allocateCell` allocates exactly the capacity it is asked for, so the
     // four-times-the-atom-count rule is the caller's to apply.
     // `spgat_standardize_cell` overwrites the buffers without ever being told
@@ -329,11 +368,60 @@ test "allocateCell supplies the fourfold headroom the raw standardisation path n
     try testing.expectApproxEqRel(input.volume() / 2.0, cell.volume(), 1e-3);
 }
 
-test "the point group result carries its transformation matrix" {
+test "the point group transformation matrix is built from upstream's axes" {
+    nativeReady();
+
     const dataset = try spglib.getDataset(fixtures.perovskite, 1e-5);
     defer dataset.deinit();
     const point_group = try spglib.getPointGroup(dataset.operations().rotations);
-    for (point_group.trans_mat) |row| {
-        for (row) |value| try testing.expect(value >= -3 and value <= 3);
+
+    // `trans_mat` is not an arbitrary 3x3 matrix and "every entry is small" is
+    // not a property of it. `set_transformation_matrix` (src/pointgroup.c)
+    // writes `tmat[i][j] = s[j] * rot_axes[axes[j] % NUM_ROT_AXES][i]`, where
+    // `s[j]` is +1 or -1 depending on whether that axis is a proper or an
+    // improper rotation. So **every column of the answer is some row of
+    // upstream's `rot_axes` table, up to an overall sign**, and nothing else
+    // can come back.
+    //
+    // The table below is a second copy of that 73-row array, read out of
+    // `src/pointgroup.c` rather than from the library, so the check compares
+    // two independent statements of the same rule. A matrix assembled from
+    // arbitrary small integers - which is what a range test would accept -
+    // fails it.
+    const rot_axes = [_][3]c_int{
+        .{ 1, 0, 0 },   .{ 0, 1, 0 },   .{ 0, 0, 1 },   .{ 0, 1, 1 },   .{ 1, 0, 1 },
+        .{ 1, 1, 0 },   .{ 0, 1, -1 },  .{ -1, 0, 1 },  .{ 1, -1, 0 },  .{ 1, 1, 1 },
+        .{ -1, 1, 1 },  .{ 1, -1, 1 },  .{ 1, 1, -1 },  .{ 0, 1, 2 },   .{ 2, 0, 1 },
+        .{ 1, 2, 0 },   .{ 0, 2, 1 },   .{ 1, 0, 2 },   .{ 2, 1, 0 },   .{ 0, -1, 2 },
+        .{ 2, 0, -1 },  .{ -1, 2, 0 },  .{ 0, -2, 1 },  .{ 1, 0, -2 },  .{ -2, 1, 0 },
+        .{ 2, 1, 1 },   .{ 1, 2, 1 },   .{ 1, 1, 2 },   .{ 2, -1, -1 }, .{ -1, 2, -1 },
+        .{ -1, -1, 2 }, .{ 2, 1, -1 },  .{ -1, 2, 1 },  .{ 1, -1, 2 },  .{ 2, -1, 1 },
+        .{ 1, 2, -1 },  .{ -1, 1, 2 },  .{ 3, 1, 2 },   .{ 2, 3, 1 },   .{ 1, 2, 3 },
+        .{ 3, 2, 1 },   .{ 1, 3, 2 },   .{ 2, 1, 3 },   .{ 3, -1, 2 },  .{ 2, 3, -1 },
+        .{ -1, 2, 3 },  .{ 3, -2, 1 },  .{ 1, 3, -2 },  .{ -2, 1, 3 },  .{ 3, -1, -2 },
+        .{ -2, 3, -1 }, .{ -1, -2, 3 }, .{ 3, -2, -1 }, .{ -1, 3, -2 }, .{ -2, -1, 3 },
+        .{ 3, 1, -2 },  .{ -2, 3, 1 },  .{ 1, -2, 3 },  .{ 3, 2, -1 },  .{ -1, 3, 2 },
+        .{ 2, -1, 3 },  .{ 1, 1, 3 },   .{ -1, 1, 3 },  .{ 1, -1, 3 },  .{ -1, -1, 3 },
+        .{ 1, 3, 1 },   .{ -1, 3, 1 },  .{ 1, 3, -1 },  .{ -1, 3, -1 }, .{ 3, 1, 1 },
+        .{ 3, 1, -1 },  .{ 3, -1, 1 },  .{ 3, -1, -1 },
+    };
+    for (0..3) |column| {
+        const axis: [3]c_int = .{
+            point_group.trans_mat[0][column],
+            point_group.trans_mat[1][column],
+            point_group.trans_mat[2][column],
+        };
+        const negated: [3]c_int = .{ -axis[0], -axis[1], -axis[2] };
+        const found = for (rot_axes) |row| {
+            if (std.meta.eql(row, axis) or std.meta.eql(row, negated)) break true;
+        } else false;
+        if (!found) {
+            std.debug.print(
+                "trans_mat column {d} is {any}, which is not a row of rot_axes " ++
+                    "up to sign\n",
+                .{ column, axis },
+            );
+            return error.TestUnexpectedResult;
+        }
     }
 }

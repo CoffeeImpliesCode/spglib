@@ -6,12 +6,14 @@ the evidence it came from, the cause hypothesis, what was done, and the rule
 worth keeping.
 
 Verification status is stated per entry. Nothing here has been run by the
-packaging worker, by the corrective review or by the documentation
-reconciliation: no build, test, smoke, cross-target or formatting command was
-executed for any entry. `PENDING-VERIFICATION` is the status of every
-correction in this file: the change is in the source and no gate has observed
-it. `OBSERVED` is reserved for something the integration owner recorded in a
-receipt. Entries 13 to 23 come from the corrective review of the first
+packaging worker, by the corrective review, by the documentation
+reconciliation or by the documentation correction in entry 34: no build, test,
+smoke, cross-target, packaging or formatting command was executed for any
+entry. `PENDING-VERIFICATION` is therefore the default status of a correction
+in this file: the change is in the source and no gate has observed it.
+`OBSERVED` is reserved for something the integration owner recorded in a
+receipt, and where one entry holds both, it says which part is which.
+Entries 13 to 23 come from the corrective review of the first
 implementation and are SOURCE-CONFIRMED against the pinned upstream sources,
 the pinned compiler's own translation and build sources, and the imported
 workflow files. Entries 24 to 27 come from the second reconciliation and are
@@ -84,8 +86,11 @@ SOURCE-CONFIRMED against the same pinned sources.
 * **Cause (hypothesis).** The public name and the file name drifted apart
   upstream.
 * **Fix.** The Zig artifact is named `spglib` as the fork contract requires.
-  System-library mode links `symspg` with pkg-config, which is the name that
-  actually resolves.
+  System-library mode links `spglib` through pkg-config with `.force`
+  (`build.zig`'s single `linkSystemLibrary("spglib", .{
+  .use_pkg_config = .force })`), which is the name this package's own installed
+  `spglib.pc` resolves and the one that actually resolves against a prefix built
+  here.
 * **Affected.** System-integration mode on every platform.
 * **Rule.** Before writing a system-library mode, read what the upstream build
   actually installs; the project name, the artifact name and the pkg-config name
@@ -523,7 +528,10 @@ SOURCE-CONFIRMED against the same pinned sources.
   the CI and Codecov badge links in the upstream `README.md` are still present.
   They are upstream repository configuration and prose rather than publication
   workflows, so they were left alone; the upstream `README.md` was not edited
-  because this fork documents itself in `README.zig.md` instead.
+  because this fork documented itself in `README.zig.md` instead. **Superseded
+  on 2026-10-04:** upstream's README now lives unchanged at
+  `README.upstream.md` and this fork's own `README.md` is a separate document;
+  see entry 31. The badge links still live in the preserved upstream file.
 
 ## 23. A cross target named a field that does not exist, and the root depended on its own consumer
 
@@ -548,32 +556,54 @@ SOURCE-CONFIRMED against the same pinned sources.
   triple })` (lib/std/Build.zig:1423), which is the very entry point
   `standardTargetOptionsQueryOnly` uses at Build.zig:1500, so `-Dtarget=` and
   the matrix agree on what a triple means. The manifest dependency is deleted.
-  `zig build consumer` now invokes the consumer as its own build:
-  `b.graph.zig_exe build run` for a target this host can execute and
-  `b.graph.zig_exe build install` for a foreign one, in `zig/consumer`, with
-  `-Dtarget=`, `-Dcpu=` and `-Doptimize=` forwarded as single arguments from
-  `Target.Query.zigTriple` (:421) and `Query.serializeCpuAlloc` (:530), and with
-  `--cache-dir` and `<outer>/consumer` as two arguments when the outer build
-  was given an explicit cache directory (`b.cache_root.path`,
+  `zig build consumer` now invokes the consumer as its own build in
+  `zig/consumer`, as `b.graph.zig_exe build run` or
+  `b.graph.zig_exe build install`, with `-Dtarget=`, `-Dcpu=` and
+  `-Doptimize=` forwarded as single arguments from `Target.Query.zigTriple`
+  (:421) and `Query.serializeCpuAlloc` (:530), and with `--cache-dir` and
+  `<outer>/consumer` as two arguments when the outer build was given an
+  explicit cache directory (`b.cache_root.path`,
   lib/std/Build/Cache/Directory.zig:13).
   A subdirectory, not the outer path itself, because two build graphs must not
   share one manifest directory; a null path means "the current directory" and
-  the working directory is already the consumer package. Because the consumer
-  is a separate process, its choices constrain nothing else in this build,
-  which is what a build-time dependency on it would have done.
+  the working directory is already the consumer package.
+  The install prefix follows as `--prefix` and an absolute path when the caller
+  named one, and is left out while `b.install_prefix` is still `<build
+  root>/zig-out`. Without it the nested build installs into
+  `zig/consumer/zig-out`, a build artefact inside this checkout, and a relative
+  value would resolve against `zig/consumer` instead of against this build's
+  root.
+  The step is `run` when `hostCanExecute` says this build can execute the
+  resolved target, and `install` when it cannot. That predicate is
+  `std.zig.system.getExternalExecutor`, the one `std.Build.Step.Run` asks about
+  the artifact it is about to spawn, and an external executor counts only when
+  the build runner was told it may use one. A foreign target therefore runs
+  under QEMU, Wasmtime, Wine or Darling when that switch is on, and `install`
+  is not the answer for every target this host cannot run natively. Because the
+  consumer is a separate process, its choices constrain nothing else in this
+  build, which is what a build-time dependency on it would have done.
 * **Affected.** `build.zig`, `build.zig.zon`, `zig/consumer` and the CI job that
   calls `zig build consumer`; no C source, facade or test changed.
 * **Rule.** A package must not depend on a package that depends on it: run the
   consumer as a separate build instead. And read the pinned toolchain's struct
   before writing an initializer against it, because a wrong field name is not
   a default, it is an error.
-* **Verification.** PENDING-VERIFICATION. Every claim above is SOURCE-CONFIRMED
-  from the pinned `lib/std`; that `zig build check-targets` and
-  `zig build consumer` run needs the gates.
+* **Verification.** Partly observed. Every claim above is SOURCE-CONFIRMED from
+  the pinned `lib/std` and from the current `runConsumer` and `hostCanExecute` in
+  `build.zig`. Nine `zig build consumer` cases on this host's
+  `x86_64-linux-gnu` then observed the forwarding itself: both linkages, both
+  runtime selections, the default and the explicit target, both cache
+  directories and the install prefix, with the provider handed to the program as
+  a flag and no provider variable in the child environment. `README.md` records
+  them under "Nested consumer delivery". A foreign target under an enabled
+  executor, the `-fsys=spglib` route and `zig build check-targets` are still
+  PENDING-VERIFICATION.
 * **Not a risk, checked.** The cache forwarding above is the same shape the
   Random123 fork uses and needs no new helper: `b.cache_root` is a
   `Cache.Directory` whose `path` field is already the nullable string
-  `Build.zig:58` sets from the runner's `--cache-dir`.
+  `Build.zig:58` sets from the runner's `--cache-dir`. The global cache is read
+  the same way, as `b.graph.global_cache_root.path`, because `global_cache_root`
+  is a field of `pub const Graph` and not of `Build`.
 
 ## 24. The system-integration flag is `-fsys=`, not a `-D` option
 
@@ -608,32 +638,42 @@ SOURCE-CONFIRMED against the same pinned sources.
   SOURCE-CONFIRMED from the pinned compiler's `lib/std/Build.zig` and
   `lib/compiler/build_runner.zig`.
 
-## 25. This toolchain has no `zig fetch` command
+## 25. A command list read from the build runner is not the compiler's command list
 
 * **Symptom and evidence.** Entry 20 replaced a placeholder fetch instruction
-  with `zig fetch --save ../spglib`. There is no `fetch` command in this
-  compiler. The build runner's own usage text lists the package-management
-  options and they are `--fetch[=mode]` ("Fetch dependency tree and exit"),
-  `--fetch=needed`, `--fetch=all` and `--fork=[path]` ("Override one or more
-  projects from dependency tree")
-  (lib/compiler/build_runner.zig:1662-1666); a search of `lib/` for `zig fetch`
-  finds no such command. Documenting a command that does not exist is the same
-  defect as the placeholder it replaced.
-* **Cause (hypothesis).** The instruction was carried over from an older Zig
-  release instead of being read out of the pinned compiler, and the fix was
-  applied to the sentence rather than to the command.
-* **Fix.** `README.zig.md` no longer tells a reader to run a fetch command. It
-  shows the manifest form that this repository's own consumer package uses,
-  `.spglib = .{ .path = "../spglib" }` in `.dependencies`, which needs no
-  command, no digest and no credentials, and it points at
-  `zig/consumer/build.zig.zon` as the complete worked example. The build-runner
-  options are named so a reader who wants the tree-wide form can look them up.
+  with `zig fetch --save ../spglib`, and this entry then recorded that there is
+  no `fetch` command in this compiler at all. Both halves were wrong, in
+  opposite directions. `zig fetch` exists: the pinned compiler's own usage text
+  carries `zig fetch --save git+https://example.com/andrewrk/fun-example-tool.git`
+  and the matching `.tar.gz` form, and a recorded invocation of `zig fetch
+  <path>` on this toolchain exited 1 with "could not be recognized as a file
+  path (FileNotFound) or an URL (InvalidFormat)" — a subcommand that did not
+  exist could not diagnose its argument. What this entry had read was the build
+  runner's own package-management options, `--fetch[=mode]` ("Fetch dependency
+  tree and exit"), `--fetch=needed`, `--fetch=all` and `--fork=[path]` ("Override
+  one or more projects from dependency tree")
+  (lib/compiler/build_runner.zig:1662-1666), and then a text search of `lib/`
+  for `zig fetch`, which returns that flag list rather than the CLI's commands.
+* **Cause (hypothesis).** The conclusion was drawn from one subsystem's option
+  list standing in for another's command list, and the check that was meant to
+  confirm it — a search — could only find what that option list contains.
+* **Fix.** The recommendation never changed and was right for the wrong reason: a
+  `.path` dependency is what resolves, because this package has no published URL
+  and no content hash to fetch from. What changed is the account of why, here,
+  in `README.zig.md` and in `CHANGELOG.md` entry 10: `zig fetch` exists and is
+  simply not an answer for this package, and the build runner's `--fetch` and
+  `--fork` are a separate pair of options.
 * **Affected.** Documentation only; `zig/consumer/build.zig.zon` already used
   the `.path` form and never used a fetch command.
-* **Rule.** Before a document tells a reader to run a tool command, read the
-  command list out of the pinned toolchain. When the fix for a placeholder is
-  to replace a sentence, check the command inside it too.
-* **Verification.** PENDING-VERIFICATION; no command was run for this entry.
+* **Rule.** Before a document tells a reader to run a tool command, read it out
+  of the tool's own help or run it once. A flag list from one subsystem is not
+  the command list of another, and a search that can only return that flag list
+  cannot refute a command. When the fix for a placeholder is to replace a
+  sentence, check the command inside it too.
+* **Verification.** OBSERVED for the command's existence, on the toolchain this
+  package pins, by a recorded `zig fetch` invocation that reached its own
+  argument diagnostic. Whether a hosted fetch would resolve is not claimed and
+  cannot be: there is no URL and no hash to fetch from.
 
 ## 26. `anytype` is not a return type
 
@@ -802,3 +842,378 @@ binding defect from a compiler defect.
 
 **Verification status.** Observed: 41/54 before the change, 52/54 after, with
 Debug and ReleaseSafe agreeing.
+
+## 31. The upstream README occupied the path this fork needed, and packaging wanted to be a second writer
+
+Two problems from the 2026-10-04 contract migration, both of which look like
+documentation until they become a licence or a link error.
+
+### 31a. A vendored project's own README is upstream content at the canonical path
+
+* **Condition.** A downstream packaging of an upstream project that ships its
+  own `README.md` at the repository root.
+* **Symptom and evidence.** `README.md` was upstream's file, byte for byte
+  (sha256 `294f6f53…`), so this fork had no README of its own: every fact about
+  the fork lived in `README.zig.md`, and the document a reader opens first
+  described CMake, PyPI and the upstream badge links instead. `FORK-NOTES.md`
+  entry 22 records the earlier decision to leave that file alone, and states the
+  reason that produced the gap.
+* **Fix.** Upstream's bytes were preserved at `README.upstream.md` and the
+  canonical `README.md` became this fork's document, in the fixed order:
+  native-source deviations, native-build deviations with the dated history link,
+  the support matrix with each row's evidence status, then consumption. The
+  Zig interface stayed in `README.zig.md`. `UPSTREAM.md`, `NOTICE.md`,
+  `CHANGELOG.md` and the one README citation in `FORK-NOTES.md` entry 22 now name
+  the preserved path. `tools/check_provenance.sh` gained the check that makes
+  this durable: `README.upstream.md` must equal upstream's README at the pinned
+  commit, extracted from the clone and compared byte for byte, and `README.md`
+  must *not* equal it. A name is not evidence; bytes are.
+* **Rule.** Never label a fork-authored README upstream, and never overwrite an
+  upstream file without preserving its bytes somewhere a gate can compare. When
+  a preserved copy and a new document share a name's history, record the
+  preserved one's digest in the record file, not just its path.
+* **Targets bound.** Any vendored or imported project with a root README. The
+  comparison needs the full clone, because it reads the pinned commit; it cannot
+  run against a filtered or fetched source copy.
+
+### 31b. A package definition must not re-author what the build already installs
+
+* **Condition.** A derivation whose only build command is the project's own
+  `zig build install`, and an installed tree the build already owns completely.
+* **Symptom and evidence.** `build.zig` installs the library, both headers, a
+  relocatable `spglib.pc` and the four licence and provenance records. The
+  natural instinct for `package.nix` was to copy the licence files again and to
+  write its own `spglib.pc` with `-L$out/lib` — a second writer, a second
+  spelling of one fact, and a metadata file that silently disagrees with the
+  `${pcfiledir}` form the build emits. Neither would ever have failed loudly.
+* **Fix.** `build.zig` is the single writer; `package.nix` verifies. Its
+  post-install phase checks both headers, the four records under
+  `share/licenses/spglib/`, the library file for the requested linkage, and that
+  the installed `spglib.pc` links `-lspglib`. It writes nothing.
+* **Three facts this made visible, each read out of a file rather than
+  remembered.** `build.zig` names the artefact `spglib`, so the installed
+  metadata must say `-lspglib`; upstream's CMake install names the same library
+  `symspg` (`CMakeLists.txt:108-113`, `cmake/spglib.pc.in:4`), and a `.pc`
+  copied from upstream would name a library the output does not contain. The
+  static archive needs `-lm` in `Libs` because the consumer performs spglib's
+  `sqrt`/`fabs`/`sin`/`cos` calls itself, while the shared object recorded them
+  at link time, so only it carries `Libs.private: -lm` — and which of the two a
+  target needs is the same `needsLibM` decision the library link makes. And
+  upstream's `.pc.in` bakes in absolute `@CMAKE_INSTALL_FULL_*@` paths, which
+  are wrong for both a `--prefix` install and a store path.
+* **Rule.** Packaging may verify a build's installed output; it must not
+  re-author it. When a derivation has to know a fact, make the check fail
+  loudly on the fact's absence instead of writing a second copy of it.
+* **Open, and deliberately not asserted.** Whether Zig's build graph consumes
+  nixpkgs' `NIX_CFLAGS_COMPILE` was not determined here, so this file makes no
+  claim that the packaged library carries nixpkgs' hardening flags, and
+  `package.nix` passes no C flag of its own. If a gate shows the flags are
+  ignored, the correction belongs in the build, not in the derivation.
+* **Targets bound.** Any SDK whose native build owns a complete install tree.
+* **Verification status.** Partly observed on 2026-10-04, against the source as
+  it stood then; `README.md`'s matrix carries the receipts. `nix build` of both
+  `x86_64-linux` derivations exited 0, the flake's three package names and each
+  variant's `passthru.linkage` evaluated, and devenv's three lazy output
+  attributes evaluated without building the library. `devenv shell` itself was
+  not entered, no installed-C consumer has run, and the extended provenance gate
+  has not been re-run since it was extended. Those two Nix builds also predate
+  the `-Dtarget` `package.nix` now derives from `stdenv.hostPlatform`, so the
+  three systems other than `x86_64-linux` are owed a build each.
+  `flake.lock` now exists and pins the nixpkgs revision `flake.nix` names, by
+  revision and resolved hash; there is no `devenv.lock`, and `devenv.yaml` pins
+  its own input by revision. Corrected 2026-10-04.
+
+## 32. "Not in this stage" is not the same as "not part of the SDK"
+
+* **Condition.** Documentation written while a migration wave is still moving,
+  for a feature another role is delivering in the same wave.
+* **Symptom and evidence.** `README.md` described runtime loading with
+  stage-scoped wording — "not wired in this stage", "a later stage replaces
+  this paragraph" — and the first report repeated that phrasing. Runtime loading
+  is part of the SDK contract for all nineteen migrations, and the graph,
+  descriptor, facade and loader core were landing in the same wave. A reader
+  takes "not in this stage" as "not supported", and a report that says it turns
+  a moving part into an apparent exclusion that the next reader has to undo.
+* **Fix.** The README now describes what the package does — it links its C core,
+  and the dynamic variant is an ordinary shared object — then lists the provider
+  requirements that hold whenever a provider is loaded, and marks the route as
+  PENDING-VERIFICATION until the driver gates it. The matrix says "no gate has
+  observed these yet; they are open work, not exclusions" instead of "not
+  claimed anywhere in this repository". No sentence in the fork's documents
+  refuses a capability the contract requires.
+* **Rule.** Describe the current boundary and the pending work; never describe a
+  moving part as an exclusion. "No observation yet" is a statement about evidence.
+  "Not a feature" is a statement about the product, and only the interface owner
+  may make it.
+* **Targets bound.** Any document or report written mid-wave. A stage number in
+  prose is a maintenance liability: it expires silently.
+* **Verification status.** PENDING-VERIFICATION for the runtime route itself. The
+  interface is taken from the owning role's source, not from this entry.
+
+## 33. A dispatch that validates against a macro needs the header configuration that macro lives in
+
+* **Condition.** A runtime dispatch that checks a provider by calling an entry
+  point and comparing the answer with a macro from the translated header.
+* **Evidence.** `runtime/library.zig` compares `spg_get_major_version()` with
+  `dispatch.SPGLIB_MAJOR_VERSION` and the minor and micro the same way, and
+  `spg_get_version()` with `dispatch.SPGLIB_VERSION`. Those macros come from
+  `version.h`, which `build.zig` configures from `src/version.h.in` for this
+  repository's own translation. A `-fsys=spglib` translation includes the bare
+  installed `<spglib.h>`, which includes only `<stddef.h>`
+  (`include/spglib.h:51`) and defines no version macro at all.
+* **Alternative that was rejected.** Translating this repository's generated
+  `version.h` next to the installed header would make the combination compile —
+  and would bind an installed library to this tree's version claim, which is the
+  exact substitution `-fsys=spglib` exists to avoid.
+* **Fix.** `addSpglib` refuses the pair in the one place where the two modes
+  meet, with a message that names the reason and the way out: build spglib from
+  these sources to use the runtime route.
+* **Rule.** When a mode's viability comes from the *configuration* of a
+  translation rather than from its text, the honest answer is to refuse the
+  combination out loud. Synthesising the missing input from this tree converts
+  a foreign library into a claim about this one.
+* **Targets bound.** Any SDK whose dispatch or loader validates against a macro
+  that a generated header supplies, which is every SDK where the version macros
+  are configured rather than checked in.
+* **Verification status.** PENDING-VERIFICATION. The refusal is
+  SOURCE-CONFIRMED at `build.zig`; no build has been run that took that branch.
+
+## 34. A record of what is missing expires when the file lands, and a route is not a linker error
+
+* **Condition.** A readiness record written while a source file was still in
+  flight, and a provider contract that described a code path by the kind of
+  symbol it used to be.
+* **Symptom and evidence.** `README.md`, `README.zig.md` and `CHANGELOG.md`
+  entry 15 all reported `runtime/generate.zig` as not in the tree, named
+  `runtime/graph.zig:228` as the line that builds it, and concluded that a
+  runtime build cannot configure yet — while `runtime/graph.zig`'s
+  `generateDispatch` builds exactly that file as a host program for the target
+  being built and runs it over that target's own translation output. The same
+  documents described the two `provider_optional` names as direct `extern`
+  references whose absence is a link error, which is what they were before the
+  generator existed: `runtime/generate.zig`'s `Options.routeOf` sends every
+  `--optional` name down the optional route, where the dispatch gives it a
+  nullable field initialised `null`, lists it in `optional_symbols` rather than
+  in `symbols`, and emits
+  `table.<name> orelse requireAvailable("<name>", "<name>")` — a
+  `std.debug.panic` naming the library, the symbol the provider lacks and the
+  reason. A provider that does not export them therefore loads, and the first
+  call stops the program by name. The packaging records said two lock files were
+  both absent; one exists and one is not wanted, because `devenv.yaml` pins its
+  input by revision.
+* **Fix.** Each statement now describes the code that exists and names the file
+  or the function rather than a line number a later edit moves.
+  `CHANGELOG.md` entry 17 records the corrections and points at the evidence,
+  and `runtime/graph.zig`'s own comment on `provider_optional` now says the
+  same thing in the file a maintainer reads first.
+* **Rule.** Name the file or the function, not the line, in any statement about
+  moving source; and describe a route by what it does at run time rather than by
+  what it used to be called. A statement about what is missing is a claim with
+  an expiry date, and the day it is wrong it excuses a failure that no longer
+  exists — entry 32's rule applied one level up.
+* **Targets bound.** Any readiness or verification record, in any SDK whose
+  sources are still landing.
+* **Verification status.** SOURCE-CONFIRMED for every claim above, read out of
+  `runtime/generate.zig`, `runtime/graph.zig`, `build.zig.zon`, `flake.lock`,
+  `devenv.yaml` and the pinned compiler's own usage text. The gates that
+  observed both routes are in `README.md`'s matrix with their receipts, and a
+  replay against the frozen handoff is owed for the edits that landed after
+  them.
+
+## 35. A facade guard needs an arithmetic site the C really performs
+
+* **Condition.** A wrapper rejecting an argument on a range a reader can
+  imagine, while the native routine reduces that argument before using it.
+* **Evidence.** `gridPointFromAddress` guards two things and no more: a mesh
+  entry that is not positive or is above `2^30-1` (`MeshOutOfRange`), and an
+  address component above `2^30-1` in either direction
+  (`GridAddressOutOfRange`), then calls `spg_get_dense_grid_point_from_address`.
+  Both guards name arithmetic upstream really performs: `modulo_i3` divides by
+  `mesh[i]` (`src/kgrid.c:100`), the double-mesh conversion computes
+  `address[i] * 2` (`src/kgrid.c:39`), and the reduction computes
+  `2 * mesh[i]` (`src/kgrid.c:125`). What is not there is a bound of the address
+  by its mesh, and there cannot be one, because upstream folds first:
+  `spg_get_dense_grid_point_from_address` (`src/spglib.c:893-904`) doubles each
+  component, subtracts `2 * mesh[i]` once where the doubled component exceeds
+  the mesh, halves it, and takes the remainder modulo the mesh
+  (`src/kgrid.c:120-128`, `:68-83`, `:96-106`, `:85-94`). Worked through that
+  path: in a 2x2x2 mesh `{3,0,0}`, `{1,0,0}` and `{5,0,0}` all answer index 1,
+  and in a 4x4x4 mesh `{5,0,0}` answers index 1.
+* **Fix.** The mesh-membership bound is gone and the two overflow guards are
+  what remain, under the same two error names, with their meaning written in
+  `zig/error.zig` rather than restated in prose. The integration owner's run on
+  the tree before the change is the receipt that the bound existed: it refused
+  `{3,0,0}` and `{5,0,0}`, and answered index 1 for mesh `{1073741824,2,2}`,
+  where the doubling overflows.
+  A mesh entry of `2^30` is what makes that threshold the one it is: `2 * mesh[i]`
+  is `2^31`, which does not fit a signed 32-bit `int`, so before the guards an
+  entry that large reached an overflow inside the library and what a build
+  reported for it depended on how that build wrapped the overflow rather than on
+  anything the header means. With the guards no signed overflow is reachable from
+  this entry point at all, so the answer does not depend on the optimization
+  mode — which is a claim for the replay to confirm in both modes, not one this
+  entry makes on anyone's behalf.
+* **Rule.** A guard in a facade is justified by an arithmetic site in the C it
+  calls, not by a range that seems plausible. When the C normalises its
+  argument first, a bound the C never needed refuses a valid answer — and a
+  document that repeats the bound then outlives the code by years, which is
+  entry 34's failure mode one level down.
+* **Targets bound.** Any facade that validates an argument the native routine
+  normalises: grid addresses and meshes, indices, tolerances, counts.
+* **Verification status.** SOURCE-CONFIRMED from `zig/symmetry.zig`,
+  `zig/error.zig`, `src/spglib.c:893-904` and `src/kgrid.c`, including the
+  folded indices above. The behaviour is still PENDING-VERIFICATION: the red run
+  on the previous tree is recorded above, and a matching green run is owed with
+  the rest of this SDK's replay.
+
+## 36. A platform attribute that this nixpkgs does not have, and a task that inherits the caller's directory
+
+* **Condition.** An 18-SDK acceptance run on 2026-10-04 evaluated this SDK's Nix
+  variants and devenv gates from a scratch project directory, using
+  `devenv --from path:<this repository>`. Two of the SDK's own gates failed and
+  the packaging route never started.
+* **Evidence.** `nix build path:<this repository>#static #shared` exited 1 with
+  `error: attribute 'linuxLibc' missing` at `package.nix:100`,
+  `else if stdenv.hostPlatform.linuxLibc == "musl" then "musl"`, raised from
+  `derivationStrict` while evaluating attribute `installPhase` of derivation
+  `spglib-2.7.0`; the run recorded no output path at all, because evaluation
+  failed before any derivation existed. The attribute is not a spelling this
+  revision dropped from one place: the pinned nixpkgs
+  `c7def046b9a883d46974757852106483d741586f` defines no `linuxLibc` in
+  `lib/systems/parse.nix`, `lib/systems/inspect.nix` or
+  `lib/systems/default.nix`. It does define the same fact. `lib/systems/parse.nix`
+  gives every platform an ABI (`abis.gnu`, `abis.musl`, `abis.musleabi`,
+  `abis.musleabihf`, `abis.muslabin32`, `abis.muslabi64`, `abis.unknown`),
+  `lib/systems/inspect.nix:429-437` writes `isMusl` as the sum-of-products over
+  the five musl ABIs, `lib/systems/default.nix:442` runs those patterns over
+  `final.parsed` to give the elaborated platform every `is*` predicate, and
+  `lib/systems/default.nix:186` is nixpkgs asking `final.isMusl` when it names
+  the platform's own libc. Separately, `devenv tasks run sdk:consumer` reported
+  `error: no build.zig file found, in the current directory or any parent
+  directories` and `sdk:provenance` reported `line 3:
+  ./tools/check_provenance.sh: No such file or directory`, while `devenv info`
+  printed `DEVENV_ROOT` as the scratch *project* directory - which is the
+  directory those two commands ran in, and which holds `.devenv` and
+  `devenv.lock` and neither `build.zig` nor `tools/`.
+* **Fix.** `zigAbi` asks `stdenv.hostPlatform.isMusl`. The Darwin arm stays
+  first, because `lib/systems/parse.nix:963-964` parses every non-Linux,
+  non-Windows platform's ABI as `abis.unknown`, which no `isMusl` disjunct
+  matches. `sdk:build`, whose `zig build` *is* the default install step, gains
+  `--prefix` under `$SPGLIB_INSTALL`, else the exported `ZIG_LOCAL_CACHE_DIR`,
+  else the exported `TMPDIR` - with no `/tmp` default, so a caller that exported
+  none of the three is told which variable to set instead of having output
+  written somewhere it did not name, and no longer writes a `zig-out/` into the
+  checkout it was pointed at. Every task begins with
+  `cd ${lib.escapeShellArg (builtins.toString ./.)}`; the root is named by the
+  file that owns it, because `$DEVENV_ROOT` names the caller's project and
+  `builtins.toString` avoids the store copy an interpolated `${./.}` can pull
+  the whole tree into - a read-only tree that `zig build` cannot cache into.
+* **Rule.** Read a platform's libc from the ABI nixpkgs actually parsed
+  (`parsed.abi`, and the predicate built from it), never from an attribute name
+  remembered from another revision; and a generated task body owns its working
+  directory, because the harness that runs it does not. A task whose command
+  installs takes its prefix from outside the tree by default, even when the
+  command looks like an ordinary build.
+* **Targets bound.** Any Nix expression in this repository that derives a tool
+  triple, an ABI, a libc or a platform predicate from `stdenv.hostPlatform`, and
+  any devenv task or script in this repository that names a path.
+* **Verification status.** SOURCE-CONFIRMED against the pinned nixpkgs sources
+  cited above and against `devenv info`'s recorded `DEVENV_ROOT`; the acceptance
+  log is the receipt that both gates were red. PENDING-VERIFICATION: nothing was
+  built, evaluated, installed or run for this entry, and both Nix variants and
+  both devenv gates are owed a replay on the corrected source.
+
+## 37. A qualifier dropped on a premise the C contradicts, and a boundary list that stops short
+
+* **Condition.** A wrapper drops `const` where a native declaration does, and a
+  module doc states which native entry points its typed surface leaves out.
+* **Evidence.** `Cell.mutableTypePtr` said the `spgat_*` family takes `int *type`
+  "even though it only reads the types", across "the eleven call sites", and
+  `Cell.latticePtr` said "upstream's read-only entry points take non-const
+  pointers". Both are false against `include/spglib.h` and `src/spglib.c`. The six
+  declarations that drop `const` are exactly the standardisation ones
+  (`include/spglib.h:437,442,454,458,469,473`), and every other declaration in
+  the header - `spg_get_dataset` (`:206-209`), the layer, magnetic and symmetry
+  searches - declares the lattice `double const` and the types `int const`. The
+  writing is in the C, not only in the header's prose: `set_cell` copies the
+  lattice at `src/spglib.c:2070` and assigns `types[i] = cell->types[i]` at
+  `:2072`, `standardize_cell` at `:1926-1928`, and the header warns of it at
+  `:450`. The call-site count is two, not eleven - `spgat_standardize_cell` and
+  `spgat_refine_cell` (`zig/dataset.zig:310,360`) - each through an `OwnedCell`.
+  The module doc's boundary sentence named three omissions
+  (`zig/root.zig:49-52`, and the same three again in `README.zig.md:294-297`)
+  where `include/spglib.h` declares 26 non-deprecated entry points with no facade
+  function: `spg_delaunay_reduce` (`:480`), the non-dense
+  `spg_get_grid_point_from_address` (`:491`), four standardisation declarations
+  that take no angle tolerance (`:437,454,458,469`),
+  `spgat_get_dataset_with_hall_number` (`:239`), the collinear-spin
+  (`:261,267,273`) and site-tensor (`:301,308,316`) searches, the
+  symmetry-to-type searches (`:341,345`), the magnetic operation-database
+  lookup (`:420`), the four reciprocal-mesh constructors (`:512,517,531,535`),
+  the four grid-points-by-rotations entry points (`:544,547,551,555`) and the
+  two Brillouin-zone relocations (`:582,587`).
+* **Fix.** Both doc comments name the six declarations and the `src/spglib.c`
+  lines that write, and say that a search entry point never writes through the
+  pointer - which is what `AGENTS.md` section 4 asks for and the old text did
+  not. `Cell.mutableTypePtr` also names what the dropped qualifier costs: a
+  `Cell.types` is caller storage that may be in read-only data, so a caller that
+  must standardise copies into an `OwnedCell`. The same false premise at
+  `OwnedCell.mutableTypePtr` went with it. The module doc is now the single
+  complete account, and the README points at it.
+* **Rule.** A `const` is dropped for a named file and line that writes, never
+  for a claim about what a *family* of entry points does; and a list of what a
+  facade omits is only worth printing if it was produced by reading every
+  declaration, because the omissions that hurt are the ones a reader would
+  otherwise assume exist - `niggliReduce` sat next to `delaunayReduce` in the
+  export list while only the first had a binding.
+* **Targets bound.** Any binding over a C header whose declarations disagree
+  about `const`, and any facade whose doc comment enumerates its own
+  omissions - `zig/cell.zig` and `zig/root.zig` here.
+* **Verification status.** SOURCE-CONFIRMED by reading `include/spglib.h`,
+  `src/spglib.c`, `zig/cell.zig` and `zig/dataset.zig`. **OBSERVED-PASS on both
+  routes**: the integration owner's probe ran the linked static route and the
+  loaded route against an **own dynamically loaded provider** — the
+  `libspglib.so` this SDK itself built at
+  `/home/tmp2/gertullj/scratch/foundation-libs/native-final-prefixes/contract-final-after-20261004/spglib-dynamic-Debug/lib/libspglib.so`,
+  the same own-provider library the loaded sweep opened, **not a downloaded or
+  independent one** — **8 of 8 steps each**,
+  and every run answered space group **225 Fm-3m**, Hall **523**, **192**
+  operations and a **2-atom** primitive cell. Its receipt is
+  `/home/tmp2/gertullj/scratch/foundation-libs/spglib-const-cell-evidence-20261005.json`,
+  built from the two observed runs. PENDING-VERIFICATION: `smoke`, `check` and
+  `check-targets` as whole-SDK gates against the edited source are still owed —
+  see the bound below.
+* **What changed, and what did not.** The edit is documentation: the two doc
+  comments in `zig/cell.zig`, the module doc in `zig/root.zig`, the
+  `README.zig.md` escape-hatch paragraph and the consumer-obligation paragraph
+  beside it. No exported signature, error set, ABI, cast, macro or preprocessor
+  define changed, and no native source, header, upstream test, data byte or
+  licence byte changed. The finding was cleared by reading all four files
+  named above, which is what `SOURCE-CONFIRMED` means here and was never a
+  substitute for a gate. The integration owner's probe is that gate, and it has
+  now printed for both routes.
+* **The borrowed arrays came back byte-identical, and that is the whole of what
+  the comparison establishes.** It is recorded as **unchanged bytes**, not as
+  "no write occurred": equal bytes cannot distinguish an array that was never
+  written from one written back with the same values, and the six declarations
+  above do write. What the probe adds to the source reading is the
+  *scientific answer* — the standardisation entry points return the primitive
+  cell upstream's own fixture expects — not a claim about the store.
+* **What the probe actually covers, and what it deliberately does not claim.**
+  It is a direct smoke over the typed surface plus an FFI fixture that reads a
+  dataset through `getDataset`'s `const` lattice and then standardises a copy
+  through an `OwnedCell`, checking that the borrowed cell is preserved. That is
+  the whole of its scope. **It is not a whole-SDK source-identity claim**: the
+  runs were direct smokes against this tree while this SDK's Markdown was still
+  being written, no build-graph or native byte changed during them, and nothing
+  here says they cover a target, an optimize mode or a step they did not run.
+  No API type, macro, native source or C cast changed, and the documentation
+  correction that started this — the `Cell.mutableTypePtr` /
+  `OwnedCell.mutableTypePtr` comments and the module doc's omitted-surface list
+  — is landed and accepted against exactly this source.
+* **Two compile errors in an earlier private probe were that probe's faults.**
+  It stopped first on an absolute zone path and then on `memcpy` types. Both
+  were in the probe's own throwaway manifest and bytes helper, not in this SDK;
+  the helper was corrected with **no SDK change**, and the corrected probe ran
+  directly in 4.12 s. They are recorded here so no future reader mistakes a
+  harness error for a library finding.

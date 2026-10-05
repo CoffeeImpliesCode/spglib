@@ -20,8 +20,15 @@ const ffi = @import("ffi.zig");
 /// with `@typeInfo(RawError)`.
 pub const RawError = @TypeOf(c.spg_get_error_code());
 
-/// Mirrors `SpglibError` from include/spglib.h.
+/// Mirrors `SpglibError` from include/spglib.h, one tag per enumerator, in the
+/// same order and with the same numeric values.
+///
+/// A recorded code is a per-thread, cleared-by-success value; `lastErrorCode`
+/// owns that lifetime. It is a diagnostic behind the error a facade call
+/// returned, not a second result channel.
 pub const ErrorCode = enum(c_int) {
+    /// The last call succeeded. Overwritten by every successful entry point,
+    /// `getVersion` included.
     success = 0,
     spacegroupSearchFailed = 1,
     cellStandardizationFailed = 2,
@@ -31,11 +38,17 @@ pub const ErrorCode = enum(c_int) {
     niggliFailed = 6,
     delaunayFailed = 7,
     arraySizeShortage = 8,
+    /// Recorded when a call signalled failure without naming a cause, and the
+    /// value any code outside the table is reported as. `errorMessage` has no
+    /// text for it: `spg_get_error_message` breaks on the `SPGERR_NONE`
+    /// sentinel before it compares its argument (src/spglib.c:214-228).
     none = 9,
 };
 
-/// Failure codes returned by the spglib entry points. `None` is what spglib
-/// reports when a call signals failure without recording a specific code.
+/// Failure codes returned by the spglib entry points, one error per
+/// `ErrorCode` enumerator other than `success`. `None` is what spglib reports
+/// when a call signals failure without recording a specific code, and is
+/// deliberately not folded into success.
 pub const Error = error{
     SpacegroupSearchFailed,
     CellStandardizationFailed,
@@ -66,11 +79,14 @@ pub const InputError = error{
     HallNumberOutOfRange,
     /// A UNI number is outside the 1..1651 range the database covers.
     UniNumberOutOfRange,
-    /// A k-point mesh entry is not a positive integer.
+    /// A k-point mesh entry is not a positive integer, or is too large for the
+    /// `2 * mesh[i]` the doubled-mesh reduction computes (src/kgrid.c:125).
     MeshOutOfRange,
-    /// A grid address lies outside the mesh it is mapped against.
+    /// A grid address component does not fit the `address[i] * 2` the
+    /// doubled-mesh conversion computes (src/kgrid.c:39). This is not a bound on
+    /// the mesh: an address outside the mesh names the point it folds onto.
     GridAddressOutOfRange,
-    /// `symprec` is not positive; spglib divides by it internally.
+    /// `symprec` is not positive; rejected before calling spglib.
     NonPositiveSymprec,
     /// A tensor rank is outside the 0..1 range spglib implements. `SiteTensorType`
     /// has only `NOSPIN`, `COLLINEAR` and `NONCOLLINEAR` (src/cell.h:10-14) and

@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: BSD-3-Clause
+//
+// Fork-authored. `FORK-LICENSE.md` records the owner's authorization of that
+// grant for this file and `COPYING` holds upstream's own BSD 3-Clause text.
+
 .{
     // This package is the Zig packaging of spglib v2.7.0. Consumers import the
     // `spglib` module; see README.zig.md.
@@ -15,21 +20,89 @@
     .paths = .{
         "build.zig",
         "build.zig.zon",
-        // The Zig facade, tests, example and consumer package.
-        "zig",
-        // Upstream C core, public header and the version.h template.
+        // The Zig facade. Listed file by file rather than as the `zig`
+        // directory: a bare directory entry walks everything under it, and
+        // `zig/consumer/.zig-cache/` is a build output that a package must not
+        // carry. A new file added directly under `zig/` has to be named here.
+        "zig/root.zig",
+        "zig/ffi.zig",
+        "zig/cell.zig",
+        "zig/dataset.zig",
+        "zig/error.zig",
+        "zig/magnetic.zig",
+        "zig/symmetry.zig",
+        "zig/version.zig",
+        // The fork's own tests, its example and the downstream consumer
+        // package, named the same way so their caches stay out.
+        "zig/tests",
+        "zig/examples",
+        "zig/consumer/build.zig",
+        "zig/consumer/build.zig.zon",
+        "zig/consumer/src",
+        // The runtime route. `runtime/graph.zig` is imported by `build.zig`
+        // itself, so a fetched package that omitted this directory would fail
+        // to configure rather than silently fall back to the linked route, and
+        // `runtime/library.zig` and the driver's common core files under the
+        // same directory are load-bearing for the same reason. The generated
+        // dispatch is written into the build cache at build time, so it needs
+        // no entry here.
+        "runtime",
+        // Upstream C core, public header and the version.h template. `database/`
+        // is deliberately absent: it holds the generators that produced the
+        // tables already compiled into `src/spg_database.c` and its siblings,
+        // and nothing in this package reads it.
         "src",
         "include",
-        // Upstream licence and provenance records.
+        // Upstream's own C example. It is not an install target - nothing
+        // installs it - but it is how this package's CI proves the installed C
+        // surface against the installed header and the installed pkg-config
+        // metadata, so a dependent that fetches the package can run the same
+        // proof. `example_full.c` and `frequency.dat` come with it.
+        "example/c_api",
+        // Upstream licence and provenance records. A private repository
+        // removes no obligation, so the licence texts and the record of what
+        // this fork changed travel with the package. `COPYING` is upstream's
+        // BSD 3-Clause text verbatim; `NOTICE.md` carries the per-file
+        // inventory; `FORK-LICENSE.md` carries the owner-authorised grant for
+        // the fork's own additions.
         "COPYING",
-        "UPSTREAM.md",
         "NOTICE.md",
+        "FORK-LICENSE.md",
+        "UPSTREAM.md",
         "CHANGELOG.md",
         "README.md",
+        "README.upstream.md",
         "README.zig.md",
         "FORK-NOTES.md",
-        // Licence and provenance gate used by the fork CI.
+        // The per-file digest record for every carried upstream byte. It
+        // names paths outside `.paths` on purpose -- upstream's tests, docs
+        // and bindings travel in this repository but not in the package -- so
+        // `sha256sum -c UPSTREAM.sha256` in a fetched package reports those as
+        // missing. That is expected, and `src/`, `include/`, `COPYING` and the
+        // symlinked `example/c_api` do check there.
+        "UPSTREAM.sha256",
+        // Standalone Nix packaging. `package.nix` is the one source-only
+        // derivation; `flake.nix` exposes it as the `.static` and `.shared`
+        // variants and `devenv.nix`/`devenv.yaml`/`.envrc` provide the
+        // canonical development shell. `flake.lock` is the flake's pinned
+        // nixpkgs input and travels with it. There is no `devenv.lock` in this
+        // tree: `devenv.yaml` pins no separate input, and a `.paths` entry
+        // naming a file the package does not carry is a package that fails to
+        // fetch, not one that is a file short. Every other entry here was
+        // checked against the tree; `devenv.lock` was the only one that was
+        // not present.
+        "package.nix",
+        "flake.nix",
+        "flake.lock",
+        "devenv.nix",
+        "devenv.yaml",
+        ".envrc",
+        // Licence and provenance gate used by the fork CI, and the two
+        // recorded upstream patches.
         "tools",
         "patches",
+        // .zig-cache/, zig-cache/, zig-out/, zig-pkg/, .direnv/ and devenv/ are
+        // deliberately absent: build outputs, a fetched package tree and shell
+        // state are not part of a package. See .gitignore.
     },
 }

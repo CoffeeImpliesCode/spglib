@@ -8,9 +8,18 @@ const std = @import("std");
 
 const c = @import("c");
 
+/// Build and version identity, read from the library that is linked in.
+///
+/// Every field is a copy or a borrow of storage the library owns: the three
+/// numbers are returned by value, the strings are read from library static
+/// storage that lives for the lifetime of the process. There is nothing to
+/// release, and a copy of the value is independent.
 pub const Version = struct {
+    /// Major component of `version`.
     major: c_int,
+    /// Minor component of `version`.
     minor: c_int,
+    /// Patch component of `version`.
     micro: c_int,
     /// `SPGLIB_VERSION`, for example "2.7.0".
     version: []const u8,

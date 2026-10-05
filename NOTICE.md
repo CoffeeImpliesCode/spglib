@@ -60,14 +60,27 @@ are:
 
 * Added `build.zig` and `build.zig.zon`, a Zig 0.16 build of the upstream C
   core, and the Zig facade under `zig/`.
+* Added the runtime-loading sources under `runtime/`: the build-side graph
+  (`graph.zig`), the host generator that turns one translation into a dispatch
+  (`generate.zig`), the loader core (`loader.zig`), the SDK descriptor that
+  names what a provider must export (`library.zig`), and the two-file C shim
+  the dispatch calls back through (`sync.h` and `sync.c`). Nothing in `src/` or
+  `include/` changes for it.
 * Added a deterministic configuration of `src/version.h.in`. The template
   itself is untouched; `build.zig` writes `version.h` from it at build time.
 * Added tests, a runnable example, a consumer package, the licence and
   provenance gate in `tools/`, and the fork's own CI workflow.
-* Added `UPSTREAM.md`, `NOTICE.md`, `CHANGELOG.md`, `FORK-NOTES.md` and
-  `README.zig.md`.
+* Added `UPSTREAM.md`, `NOTICE.md`, `CHANGELOG.md`, `FORK-NOTES.md`,
+  `FORK-LICENSE.md` and `README.zig.md`, and the standalone packaging
+  `package.nix`, `flake.nix`, `flake.lock`, `devenv.nix`, `devenv.yaml` and
+  `.envrc`. `flake.lock` pins the nixpkgs input `flake.nix` names, by revision
+  and resolved hash; there is no `devenv.lock`, and `devenv.yaml` pins its own
+  input by revision instead. None of these files builds, downloads or
+  substitutes anything: `package.nix` runs the same `zig build install` this
+  repository already ran, from this directory's own source.
 * Appended `.zig-cache/`, `zig-cache/` and `zig-out/` to `.gitignore`, keeping
-  every upstream entry.
+  every upstream entry, and later the packaging entries `zig-pkg/`, `.direnv/`,
+  `devenv/`, `.devenv/`, `result`, `result-*` and `.nix-build/`.
 * Removed the imported upstream `.github/workflows` files.
 * Reordered the internal buffers in `src/overlap.c` so double arrays remain
   aligned for odd atom counts. The recorded patch changes no algorithm and
@@ -83,10 +96,11 @@ are:
 `src/`, `include/` and `database/` match the pinned commit plus
 `patches/0001-align-overlap-buffers.patch` and
 `patches/0002-guard-null-pure-translation.patch`, checked by the provenance gate.
-No upstream algorithm, table or numerical constant changed. The upstream
-`README.md`, `ChangeLog.md`, `Contributing.md` and
-`CITATION.cff` are unchanged; `README.zig.md` documents the Zig package
-separately instead of rewriting upstream prose.
+No upstream algorithm, table or numerical constant changed. Upstream's
+`ChangeLog.md`, `Contributing.md` and `CITATION.cff` are unchanged, and its
+`README.md` is preserved byte for byte as `README.upstream.md`, so this fork's
+own `README.md` could take the canonical path without editing upstream prose.
+`README.zig.md` documents the Zig package separately.
 
 The upstream `.github/workflows` files that came in with the import are removed,
 not carried: they are another maintainer's CI and two of them publish to the
@@ -94,7 +108,40 @@ upstream PyPI project and Codecov account. `CHANGELOG.md` entry 7 records which
 files and why. The fork's own workflow is `.github/workflows/zig-fork-ci.yaml`,
 and it is the only CI entry point in this repository.
 
+## Fork-authored files
+
+Upstream terms do not grant anything about files this fork wrote, so those files
+have their own grant: `FORK-LICENSE.md` records that the repository owner
+authorized it directly on 2026-10-04, under BSD 3-Clause to match the primary
+upstream terms, with `BSD-3-Clause` as the SPDX identifier for a newly authored
+source or build file. No individual copyright holder is asserted there, and the
+upstream authors named in `COPYING` are not credited with anything this fork
+wrote. The file-by-file inventory is `FORK-LICENSE.md`.
+
+Two paths need their own sentence, because a filename does not say whose
+content is inside it:
+
+* `README.upstream.md` is upstream content: a byte-for-byte copy of upstream's
+  `README.md` at the pinned commit. It is governed by `COPYING`, not by the fork
+  grant, and `tools/check_provenance.sh` proves the bytes still match.
+* `patches/*.patch` quote hunks of upstream C, which stays BSD 3-Clause under
+  `COPYING`; the patch files themselves are fork-authored text.
+
+* `UPSTREAM.sha256` is a record, not a copy: every digest line holds either an
+  upstream byte at the pin or the pin plus one of the recorded patches, and the
+  header names the three paths that are the latter. The `#` comment lines are
+  fork-authored text, covered by the fork grant; the digests record upstream's
+  bytes. `tools/check_provenance.sh` re-derives them from the pin on every run.
+
+The installed licence and provenance set is `share/licenses/spglib/COPYING`,
+`NOTICE.md`, `FORK-LICENSE.md` and `UPSTREAM.md`, copied from these files by
+`build.zig`'s install step. `package.nix` verifies that set rather than writing
+it a second time.
+
 ## Third-party code
 
-None. The Zig build compiles only upstream's own C sources plus the Zig sources
-under `zig/`. No vendored third-party library is bundled.
+None. The Zig build compiles only upstream's own C sources plus this
+repository's own: the facade, its tests and the example under `zig/`, and,
+under `-Druntime`, the `runtime/sync.c` shim. `runtime/generate.zig` is a host
+program this build runs over its own translation output rather than a library
+it ships. No vendored third-party library is bundled.

@@ -13,10 +13,14 @@ const std = @import("std");
 
 const err = @import("error.zig");
 
-/// A borrowed crystal cell.
+/// A crystal cell that borrows its atom data from the caller.
 ///
-/// The slices must outlive every spglib call that reads them; spglib copies what
-/// it needs and never retains the pointers.
+/// `Cell` owns nothing and releases nothing. The three fields name storage the
+/// caller keeps alive, and leaves unwritten, for the duration of every spglib
+/// call that reads them; spglib copies what it needs and never retains the
+/// pointers. A copied `Cell` is another view of the same three fields rather
+/// than an independent cell, so it needs no release of its own and does not
+/// outlive a change to any of them.
 pub const Cell = struct {
     /// Lattice vectors as columns in Cartesian components.
     ///
@@ -29,6 +33,8 @@ pub const Cell = struct {
     /// Atom types, compared by equality only.
     types: []const c_int,
 
+    /// Number of atoms, from `positions`. `types` has to be exactly this long
+    /// or the cell is rejected with `error.AtomCountMismatch`.
     pub fn atomCount(self: Cell) usize {
         return self.positions.len;
     }
@@ -89,18 +95,28 @@ pub const Cell = struct {
         return std.math.acos(dot / (la * lb));
     }
 
-    /// Upstream's entry points declare the lattice as `double lattice[3][3]`,
-    /// which as a parameter is `double (*)[3]`: a pointer to the *first row*,
-    /// not to the whole 2D array.  That is why this returns `[*c][3]f64` and
-    /// why it points at `lattice[0]`.  It is not const, because the C side
-    /// may write through it.
+    /// `double lattice[3][3]` as a parameter is `double (*)[3]`, a pointer to
+    /// the *first row*, not to the whole 2D array.  That is why this returns
+    /// `[*c][3]f64` and points at `lattice[0]`.
     ///
-    /// The receiver is `*const Cell` rather than `Cell` on purpose.  These are
-    /// called on `const` fixtures, and a by-value receiver would hand back a
-    /// pointer into a temporary copy that is dead the moment the call
-    /// returns.  The `const` is dropped deliberately: upstream's read-only
-    /// entry points take non-const pointers, and laundering the qualifier is
-    /// what lets one helper serve both directions.
+    /// The header declares this input `double const` for every search entry
+    /// point, `spg_get_dataset` (`include/spglib.h:206-209`) and the layer,
+    /// magnetic and symmetry searches with it.  The pointer returned here is
+    /// mutable: this translation drops the const-array qualification, and that
+    /// loss is not a licence to write.  Every typed facade call that takes a
+    /// `Cell` reads it, and `standardizeCell` and `refineCell` copy into an
+    /// `OwnedCell` before anything writes.
+    ///
+    /// The six standardisation declarations take it un-const and do write it
+    /// (`include/spglib.h:437,442,454,458,469,473`, `set_cell` at
+    /// `src/spglib.c:2070` and `standardize_cell` at `:1926`).  The C ABI
+    /// would accept a `Cell` there, but a caller that does overwrites the
+    /// borrowed cell, which is why the facade routes those two entry points
+    /// through `OwnedCell` and its own `latticePtr`.
+    ///
+    /// The receiver is `*const Cell`, which borrows.  The returned pointer is
+    /// valid only while this cell is, and a by-value receiver would hand back a
+    /// pointer into a temporary that dies at return.
     pub fn latticePtr(self: *const Cell) [*c][3]f64 {
         return @ptrCast(@constCast(&self.lattice[0]));
     }
@@ -118,10 +134,15 @@ pub const Cell = struct {
         return self.types.ptr;
     }
 
-    /// The `spgat_*` family takes `int *type` rather than `const int *`,
-    /// even though it only reads the types.  Upstream's own headers are
-    /// inconsistent here, so the fork exposes both shapes instead of
-    /// casting at each of the eleven call sites.
+    /// `int *types`, which the six standardisation declarations take
+    /// (`include/spglib.h:437,442,454,458,469,473`) where every search
+    /// entry point declares `int const types[]`.  They write it, not read
+    /// it: `set_cell` at `src/spglib.c:2072` and `standardize_cell` at
+    /// `src/spglib.c:1928`, as the header warns at `include/spglib.h:450`.
+    /// The facade reaches two of the six (`zig/dataset.zig:310,360`), each
+    /// through an `OwnedCell` it owns.  A `Cell.types` is caller storage that
+    /// may sit in read-only data, so a caller that must standardise copies
+    /// into an `OwnedCell` rather than passing this.
     pub fn mutableTypePtr(self: *const Cell) [*c]c_int {
         return @constCast(self.types.ptr);
     }
@@ -131,33 +152,56 @@ pub const Cell = struct {
 ///
 /// `spg_standardize_cell`, `spg_find_primitive` and `spg_refine_cell` write
 /// their results into caller-provided buffers; this type owns those buffers and
-/// releases them with the same allocator. No process-global allocator hook is
-/// installed, and nothing allocated by upstream `malloc` is freed here.
+/// releases them with the same allocator. It is single-owner: a copied
+/// `OwnedCell` names the same two allocations, so `deinit` runs once, on one
+/// copy only. No process-global allocator hook is installed, and nothing
+/// allocated by upstream `malloc` is freed here.
 pub const OwnedCell = struct {
+    /// The allocator that received `positions` and `types`. `deinit` frees into
+    /// it, so it must stay valid and unchanged until then.
     allocator: std.mem.Allocator,
+    /// Lattice vectors as columns in Cartesian components, in the same layout
+    /// as `Cell.lattice`. Stored inline, so copying it needs no allocation.
     lattice: [3][3]f64,
+    /// Positions of `positions.len` atoms, owned by `allocator` and freed by
+    /// `deinit`. The standardisation helpers resize this slice to the atom
+    /// count spglib returned, which may be shorter than the capacity they
+    /// allocated.
     positions: [][3]f64,
+    /// Atom types, owned by `allocator` and freed by `deinit`, and resized with
+    /// `positions`.
     types: []c_int,
 
-    /// Releases the buffers. The lattice is inline and needs no release.
+    /// Releases both buffers with `allocator` and leaves `OwnedCell` unusable.
+    ///
+    /// The lattice is inline and needs no release. Call this exactly once, on
+    /// the one owner of the value; a second call, or a call through a copy,
+    /// frees the same bytes twice.
     pub fn deinit(self: OwnedCell) void {
         self.allocator.free(self.positions);
         self.allocator.free(self.types);
     }
 
-    /// Borrows the cell for further spglib calls. Invalid after `deinit`.
+    /// Borrows the cell for further spglib calls, valid until `deinit`.
+    ///
+    /// The result copies `lattice` by value and borrows `positions` and
+    /// `types`, so the buffers it points at must stay alive and unmodified for
+    /// as long as the result is used.
     pub fn asCell(self: *const OwnedCell) Cell {
         return .{ .lattice = self.lattice, .positions = self.positions, .types = self.types };
     }
 
+    /// Number of atoms in `positions`, which the standardisation helpers have
+    /// already trimmed to the count spglib returned.
     pub fn atomCount(self: *const OwnedCell) usize {
         return self.positions.len;
     }
 
-    /// The `spgat_*` family writes through all three of these, so an owned cell
-    /// cannot borrow itself: `asCell` returns a struct by value, and a pointer
-    /// taken into that temporary would outlive it. These address the owner's own
-    /// fields instead, which is what a call that fills the buffers needs.
+    /// The standardisation declarations write through all three of these, so
+    /// an owned cell cannot borrow itself: `asCell` returns a struct by
+    /// value, and a pointer taken into that temporary would outlive it. These
+    /// address the owner's own fields instead, which is what a call that
+    /// fills the buffers needs.
     pub fn latticePtr(self: *const OwnedCell) [*c][3]f64 {
         return @ptrCast(@constCast(&self.lattice[0]));
     }
@@ -168,21 +212,29 @@ pub const OwnedCell = struct {
         return self.positions.ptr;
     }
 
-    /// `spgat_*` declares `int *type` even where it only reads.
+    /// `int *types`, as the standardisation declarations declare it. They write
+    /// it; `Cell.mutableTypePtr` names the header and the source lines.
     pub fn mutableTypePtr(self: *const OwnedCell) [*c]c_int {
         return self.types.ptr;
     }
 };
 
-/// Allocates `capacity` atoms. The caller chooses the capacity: the lattice is
-/// left undefined and only `positions[0..capacity]` and `types[0..capacity]`
-/// are written by the caller before the spglib call that fills them.
+/// Allocates `capacity` atoms with `allocator` and stores it on the result.
+///
+/// The caller chooses the capacity: the lattice is left `undefined` and only
+/// `positions[0..capacity]` and `types[0..capacity]` are written by the caller
+/// before the spglib call that fills them. The allocator must stay valid until
+/// `OwnedCell.deinit`, which frees into it.
 ///
 /// `spg_standardize_cell`, `spg_find_primitive` and `spg_refine_cell` write up
 /// to four times the input atom count and never check the buffer they were
 /// given, so every one of those paths needs `4 * atomCount` slots. Only
 /// `spg_refine_cell` says so in the header (include/spglib.h:463-471); the
-/// standardisation paths say it nowhere and pass no array size.
+/// standardisation paths say it nowhere and pass no array size. That bound is
+/// the library's own growth factor: `spa_transform_to_primitive` sizes the
+/// conventional cell from `primitive->size * multi`
+/// (src/spacegroup.c:609-618) and `get_centering_shifts`
+/// (src/spacegroup.c:1879-1931) returns at most 4, for F centring.
 pub fn allocateCell(allocator: std.mem.Allocator, capacity: usize) !OwnedCell {
     const positions = try allocator.alloc([3]f64, capacity);
     errdefer allocator.free(positions);

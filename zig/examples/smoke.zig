@@ -3,6 +3,15 @@
 // Prints deterministic, semantic output for well-known crystals and checks it.
 // Every number below is fixed by the International Tables or by an upstream
 // fixture, so the output is a property of the library and not of this wrapper.
+//
+// ## Two configurations
+//
+// In a linked build the library is usable immediately. In a runtime-loading
+// build the provider is named on the command line (`--provider <path>`) or in
+// `SPGLIB_TEST_PROVIDER`, and the program says which configuration it is in the
+// first line. Nothing is loaded by default and no other file is tried: a
+// runtime-loading build that was not told which provider to use says so rather
+// than opening something else.
 
 const std = @import("std");
 
@@ -15,9 +24,30 @@ const fixtures = @import("fixtures");
 
 const allocator = std.heap.page_allocator;
 
-pub fn main() !void {
+/// A runtime-loading build has no provider until one is named.
+const ConfigurationError = error{NoProviderConfigured};
+
+pub fn main(init: std.process.Init) !void {
+    // In a runtime-loading build nothing below can run until a provider is
+    // loaded, and the load is the one explicit step the contract asks for. In a
+    // linked build this branch is not analyzed at all and the module is already
+    // usable.
+    if (comptime spglib.runtime_loaded) {
+        spglib.load(.{ .path = try providerRequest(init) }) catch |err| {
+            std.debug.print("smoke: loading the named provider failed: {t}\n", .{err});
+            return err;
+        };
+    }
+
     const version = spglib.getVersion();
-    std.debug.print("spglib {s} ({s})\n", .{ version.version, version.commit });
+    std.debug.print(
+        "spglib {s} ({s}), {s} provider\n",
+        .{
+            version.version,
+            version.commit,
+            if (spglib.runtime_loaded) "loaded" else "linked",
+        },
+    );
 
     try reportRutile();
     try reportPerovskite();
@@ -26,6 +56,40 @@ pub fn main() !void {
     try reportMagnetic();
     try reportFailure();
     try reportRawEscapeHatch();
+}
+
+/// The provider this run should load, from `--provider <path>` or from
+/// `SPGLIB_TEST_PROVIDER`.
+///
+/// Both are explicit. Nothing here looks in a default location and nothing
+/// falls back to a linked copy: a runtime-loading build that was not told which
+/// file to load reports that it was not told, rather than loading something
+/// else.
+fn providerRequest(init: std.process.Init) ConfigurationError![]const u8 {
+    const args = init.minimal.args.toSlice(init.arena.allocator()) catch
+        return noProvider();
+    var index: usize = 1;
+    while (index < args.len) : (index += 1) {
+        if (std.mem.eql(u8, args[index], "--provider")) {
+            if (index + 1 >= args.len) return noProvider();
+            return args[index + 1];
+        }
+    }
+    return init.environ_map.get("SPGLIB_TEST_PROVIDER") orelse
+        return noProvider();
+}
+
+/// Say which variable is missing. An error name on its own would send the next
+/// person into the loader instead of to the command line.
+fn noProvider() ConfigurationError {
+    std.debug.print(
+        "smoke: this is a runtime-loading build. Pass --provider <path>, or " ++
+            "export SPGLIB_TEST_PROVIDER with a shared object exporting the " ++
+            "entry points of include/spglib.h. Nothing is loaded by default and " ++
+            "no other file is tried.\n",
+        .{},
+    );
+    return error.NoProviderConfigured;
 }
 
 /// Rutile: space group 136, 16 operations, and 6 atoms because P4_2/mnm is a

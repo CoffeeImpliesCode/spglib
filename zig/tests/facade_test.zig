@@ -4,43 +4,57 @@
 // number and operation count fixed by the International Tables, an upstream
 // fixture from test/functional/c, or a structural invariant such as "every
 // operation maps atoms onto atoms of the same type".
+//
+// ## What a runtime-loading build needs
+//
+// Such a build has no library until `load` has been called, so every test calls
+// `nativeReady()` first. That is a no-op at comptime in a linked build. A
+// runtime-loading build that was not told which provider to use stops with the
+// variable's name rather than reporting a failure that says nothing about the
+// reason.
 
 const std = @import("std");
 
 const spglib = @import("spglib");
 const fixtures = @import("fixtures.zig");
+const provider = @import("provider.zig");
 
+const nativeReady = provider.nativeReady;
 const testing = std.testing;
 const Cell = spglib.Cell;
 const Operations = spglib.Operations;
 
-test "the recorded status maps onto an error and a message that may be absent" {
+test "the recorded status names the failure and its own message table" {
+    nativeReady();
+
     // spg_get_error_message stops at the SPGERR_NONE sentinel before it
-    // compares its argument, so no code has a message for it.
+    // compares its argument, so `.none` has no message pointer at all
+    // (`src/spglib.c:214-228` breaks on the `{SPGERR_NONE, ""}` row at index 9
+    // first). An unrecognised recorded code is reported as `.none` rather than
+    // as success, so a failure without a code is never silently dropped.
     try testing.expect(spglib.errorMessage(.none) == null);
-
-    // Every code the table does carry a string for has one.
-    const codes = [_]spglib.ErrorCode{
-        .success,
-        .spacegroupSearchFailed,
-        .cellStandardizationFailed,
-        .symmetryOperationSearchFailed,
-        .atomsTooClose,
-        .pointgroupNotFound,
-        .niggliFailed,
-        .delaunayFailed,
-        .arraySizeShortage,
-    };
-    for (codes) |code| {
-        try testing.expect(spglib.errorMessage(code) != null);
-    }
-
-    // An unrecognised recorded code is reported as `.none` rather than as
-    // success, so a failure without a code is never silently dropped.
     try testing.expectEqual(error.None, spglib.toError(.none));
+
+    // Two different codes must not come back with the same text. `spg_free_*`
+    // aside, the table at `src/spglib.c` holds one distinct string per code, so
+    // a lookup that returned a constant, or that indexed the table wrongly,
+    // would collapse them.
+    const atoms = spglib.errorMessage(.atomsTooClose);
+    const search = spglib.errorMessage(.spacegroupSearchFailed);
+    try testing.expect(atoms != null);
+    try testing.expect(search != null);
+    if (std.mem.eql(u8, atoms.?, search.?)) {
+        std.debug.print(
+            "atomsTooClose and spacegroupSearchFailed report the same text: {s}\n",
+            .{atoms.?},
+        );
+        return error.TestUnexpectedResult;
+    }
 }
 
 test "ideal cubic perovskite is Pm-3m with the full octahedral group" {
+    nativeReady();
+
     const symprec = 1e-5;
     const dataset = try spglib.getDataset(fixtures.perovskite, symprec);
     defer dataset.deinit();
@@ -58,6 +72,8 @@ test "ideal cubic perovskite is Pm-3m with the full octahedral group" {
 }
 
 test "rock salt is Fm-3m and reaches the database maximum of 192 operations" {
+    nativeReady();
+
     const symprec = 1e-5;
     const dataset = try spglib.getDataset(fixtures.rocksalt, symprec);
     defer dataset.deinit();
@@ -79,6 +95,8 @@ test "rock salt is Fm-3m and reaches the database maximum of 192 operations" {
 }
 
 test "rutile is P4_2/mnm with 16 operations and two symmetry classes" {
+    nativeReady();
+
     const symprec = 1e-5;
     const dataset = try spglib.getDataset(fixtures.rutile, symprec);
     defer dataset.deinit();
@@ -110,6 +128,8 @@ test "rutile is P4_2/mnm with 16 operations and two symmetry classes" {
 }
 
 test "body centred iron is Im-3m with Hall number 529 and 96 operations" {
+    nativeReady();
+
     const symprec = 1e-5;
     const dataset = try spglib.getDataset(fixtures.bcc, symprec);
     defer dataset.deinit();
@@ -134,6 +154,8 @@ test "body centred iron is Im-3m with Hall number 529 and 96 operations" {
 }
 
 test "a Hall number of zero selects the same group as the default search" {
+    nativeReady();
+
     const dataset = try spglib.getDataset(fixtures.rutile, 1e-5);
     defer dataset.deinit();
     const pinned = try spglib.getDatasetWithHallNumber(fixtures.rutile, 0, 1e-5);
@@ -149,6 +171,8 @@ test "a Hall number of zero selects the same group as the default search" {
 }
 
 test "the angle-tolerance entry point agrees with the default search" {
+    nativeReady();
+
     const dataset = try spglib.getDataset(fixtures.perovskite, 1e-5);
     defer dataset.deinit();
     const with_tolerance = try spglib.getDatasetWithAngleTolerance(fixtures.perovskite, 1e-5, -1.0);
@@ -158,6 +182,8 @@ test "the angle-tolerance entry point agrees with the default search" {
 }
 
 test "symprec decides whether a tetragonal distortion is seen" {
+    nativeReady();
+
     // The c axis is 0.005 A short of a: far above a 1e-5 tolerance, far below
     // a 1e-2 one.
     const ideal = try spglib.getDataset(fixtures.perovskite, 1e-5);
@@ -177,6 +203,8 @@ test "symprec decides whether a tetragonal distortion is seen" {
 }
 
 test "symprec decides whether a distorted bcc cell standardises to bcc" {
+    nativeReady();
+
     // Upstream uses symprec 1e-1 for this cell (test_standardization.cpp:9-14).
     // The primitive vectors are the columns of `I_mat`, the
     // conventional-to-primitive matrix for body centring
@@ -211,6 +239,8 @@ test "symprec decides whether a distorted bcc cell standardises to bcc" {
 }
 
 test "primitive and conventional standardisation keep the cell volume" {
+    nativeReady();
+
     const primitive = try spglib.findPrimitive(testing.allocator, fixtures.bcc, 1e-5);
     defer primitive.deinit();
     try testing.expectEqual(@as(usize, 1), primitive.atomCount());
@@ -228,6 +258,8 @@ test "primitive and conventional standardisation keep the cell volume" {
 }
 
 test "refineCell recovers the conventional Bravais lattice" {
+    nativeReady();
+
     // The fcc primitive cell of a = 4 holds one atom; its conventional cell
     // holds four and has four times the volume.
     var refined = try spglib.refineCell(
@@ -243,6 +275,8 @@ test "refineCell recovers the conventional Bravais lattice" {
 }
 
 test "a one-atom cell resolves and the result is a real rotation group" {
+    nativeReady();
+
     // `fcc_primitive` carries a single atom, so its atom count is odd. That
     // makes it the cell that exercises the odd-size path through
     // `ovl_overlap_checker_alloc`, whose blob offsets depend on `size`
@@ -296,6 +330,8 @@ test "a one-atom cell resolves and the result is a real rotation group" {
 }
 
 test "corundum is an oblique R-centred cell that reduces to ten atoms" {
+    nativeReady();
+
     // The hexagonal Al2O3 cell of upstream test_standardization.cpp:29-64.
     // Its columns are a = b = 4.8076344022756095 with gamma = 120 and
     // c = 13.1172699198127543. Read as rows instead, a would be 5.378 and b
@@ -327,6 +363,8 @@ test "corundum is an oblique R-centred cell that reduces to ten atoms" {
 }
 
 test "niggli reduction keeps the cell volume" {
+    nativeReady();
+
     var lattice: [3][3]f64 = .{
         .{ 3.0, 0.0, 0.0 },
         .{ 2.5, 1.5, 0.0 },
@@ -338,6 +376,8 @@ test "niggli reduction keeps the cell volume" {
 }
 
 test "the symmetry search refuses to truncate into a smaller buffer" {
+    nativeReady();
+
     const rutile = try spglib.getSymmetry(testing.allocator, fixtures.rutile, 1e-5, 16);
     defer rutile.deinit();
     try testing.expectEqual(@as(usize, 16), rutile.count());
@@ -354,6 +394,8 @@ test "the symmetry search refuses to truncate into a smaller buffer" {
 }
 
 test "a bounded symmetry search returns the same group as the dataset" {
+    nativeReady();
+
     const dataset = try spglib.getDataset(fixtures.rutile, 1e-5);
     defer dataset.deinit();
     const symmetry = try spglib.getSymmetry(testing.allocator, fixtures.rutile, 1e-5, 64);
@@ -367,6 +409,8 @@ test "a bounded symmetry search returns the same group as the dataset" {
 }
 
 test "the point group of the perovskite rotations is m-3m" {
+    nativeReady();
+
     const dataset = try spglib.getDataset(fixtures.perovskite, 1e-5);
     defer dataset.deinit();
     const point_group = try spglib.getPointGroup(dataset.operations().rotations);
@@ -394,21 +438,29 @@ test "the point group of the perovskite rotations is m-3m" {
 }
 
 test "the point group search rejects an empty operation list" {
+    nativeReady();
+
     try testing.expectError(error.OperationCountOutOfRange, spglib.getPointGroup(&.{}));
 }
 
 test "coincident atoms are rejected as too close" {
+    nativeReady();
+
     try testing.expectError(
         error.AtomsTooClose,
         spglib.getDataset(fixtures.coincident_atoms, 1e-5),
     );
     try testing.expectEqual(spglib.ErrorCode.atomsTooClose, spglib.lastErrorCode());
-    // A recorded failure that is in the table always has a message, and the
-    // recorded status has to be read before another call overwrites it.
-    try testing.expect(spglib.errorMessage(spglib.lastErrorCode()) != null);
+    // The recorded status is per-thread and every successful entry point
+    // overwrites it with SPGLIB_SUCCESS, so it has to be read here rather than
+    // after the next call. That ordering is the property, not whether a message
+    // happens to exist for the code.
+    try testing.expectEqual(error.AtomsTooClose, spglib.lastError());
 }
 
 test "any successful call clears the status a failure recorded" {
+    nativeReady();
+
     if (spglib.getDataset(fixtures.coincident_atoms, 1e-5)) |dataset| {
         dataset.deinit();
         return error.TestUnexpectedResult;
@@ -422,6 +474,8 @@ test "any successful call clears the status a failure recorded" {
 }
 
 test "repeated dataset failures leak nothing on the Zig side" {
+    nativeReady();
+
     // testing.allocator fails the test if an allocation made here is never
     // released. spglib allocates its dataset before failing and frees that
     // itself, so repeated failures must not accumulate memory either.
@@ -436,16 +490,26 @@ test "repeated dataset failures leak nothing on the Zig side" {
 }
 
 test "a cell with no volume fails with a real spglib status" {
+    nativeReady();
+
     if (spglib.getDataset(fixtures.degenerate, 1e-5)) |dataset| {
         dataset.deinit();
         return error.TestUnexpectedResult;
     } else |failure| {
+        // The error the call returned must be the one the library recorded,
+        // which is what makes `lastErrorCode` a diagnostic behind a real answer
+        // rather than a second channel that can disagree with it. A degenerate
+        // lattice has no space group, so some upstream failure is expected;
+        // *which* one is upstream's business and is deliberately not pinned
+        // here, because it is not a property of this wrapper.
+        try testing.expectEqual(failure, spglib.toError(spglib.lastErrorCode()));
         try testing.expect(failure != error.None);
-        try testing.expect(spglib.lastErrorCode() != .success);
     }
 }
 
 test "input mistakes are caught before the C call" {
+    nativeReady();
+
     try testing.expectError(
         error.AtomCountMismatch,
         spglib.getDataset(fixtures.mismatched_atoms, 1e-5),
@@ -478,6 +542,8 @@ test "input mistakes are caught before the C call" {
 }
 
 test "ferromagnetic, gray and antiferromagnetic rutile are three distinct types" {
+    nativeReady();
+
     const cases = .{
         .{ .spins = &fixtures.rutile_spins.ferromagnetic, .magnetic_type = @as(c_int, 1), .uni = @as(c_int, 1155) },
         .{ .spins = &fixtures.rutile_spins.gray, .magnetic_type = @as(c_int, 2), .uni = @as(c_int, 1156) },
@@ -511,6 +577,8 @@ test "ferromagnetic, gray and antiferromagnetic rutile are three distinct types"
 }
 
 test "the gray magnetic group pairs every operation with a time-reversed twin" {
+    nativeReady();
+
     const dataset = try spglib.getMagneticDataset(fixtures.rutile, &fixtures.rutile_spins.gray, 1e-5);
     defer dataset.deinit();
 
@@ -532,6 +600,8 @@ test "the gray magnetic group pairs every operation with a time-reversed twin" {
 }
 
 test "antiferromagnetic bcc iron has an anti-translation with time reversal" {
+    nativeReady();
+
     const dataset = try spglib.getMagneticDataset(fixtures.bcc_antiferromagnetic, &fixtures.bcc_spins, 1e-5);
     defer dataset.deinit();
 
@@ -551,6 +621,8 @@ test "antiferromagnetic bcc iron has an anti-translation with time reversal" {
 }
 
 test "magnetic tensor counts and ranks are validated" {
+    nativeReady();
+
     // One double per atom at rank 0: any other count is a caller mistake.
     // The spin array is bound first: a container-level array decl cannot be
     // sliced through the decl path directly.
@@ -586,6 +658,8 @@ test "magnetic tensor counts and ranks are validated" {
 }
 
 test "a rank-1 search reports three tensor components per atom" {
+    nativeReady();
+
     const tensors = [_]f64{0} ** (6 * 3);
     const dataset = try spglib.getMagneticDatasetWithTensors(fixtures.rutile, &tensors, .{
         .rank = 1,
@@ -601,6 +675,8 @@ test "a rank-1 search reports three tensor components per atom" {
 }
 
 test "a non-collinear site tensor keeps its three components per atom" {
+    nativeReady();
+
     // Upstream test_magnetic_dataset.cpp:214-231: one atom, the axial tensor
     // (1, 0, 0), and 16 operations.
     const dataset = try spglib.getMagneticDatasetWithTensors(
@@ -619,6 +695,8 @@ test "a non-collinear site tensor keeps its three components per atom" {
 }
 
 test "magnetic space-group types are looked up by UNI number" {
+    nativeReady();
+
     // database/msg/msg_numbers.csv records Litvin 1242, BNS 146.12,
     // OG 146.3.1242 at UNI 1242.
     const magnetic_type = try spglib.getMagneticSpacegroupType(1242);
@@ -631,6 +709,8 @@ test "magnetic space-group types are looked up by UNI number" {
 }
 
 test "space-group type lookups reject a number the database does not carry" {
+    nativeReady();
+
     try testing.expectError(error.HallNumberOutOfRange, spglib.getSpacegroupType(0));
     try testing.expectError(error.HallNumberOutOfRange, spglib.getSpacegroupType(531));
     try testing.expectError(
@@ -675,28 +755,92 @@ test "space-group type lookups reject a number the database does not carry" {
     try testing.expectEqualStrings("230.5.1651", last_uni.ogNumber());
 }
 
-test "grid addresses are mapped and rejected outside the mesh" {
+test "grid addresses fold onto mesh points and only unrepresentable ones are refused" {
+    nativeReady();
+
+    // The grid-point index is not a value this program can compare against a
+    // constant taken from a table, because both the mesh and the address are
+    // arguments. It is a formula instead, and the formula is upstream's own.
+    // Tracing `spg_get_dense_grid_point_from_address`
+    // (`src/spglib.c:893-904`) for address {2,1,0} in mesh {4,4,4}:
+    //
+    //   * `kgd_get_grid_address_double_mesh` (`src/kgrid.c:38-42`) doubles each
+    //     component and adds the shift, which is zero here, giving {4,2,0};
+    //   * `reduce_grid_address_double` (`src/kgrid.c:120-129`) subtracts
+    //     `2 * mesh[i]` only where the component *exceeds* `mesh[i]`, so 4 is
+    //     not greater than 4 and nothing is subtracted: {4,2,0} stays;
+    //   * `get_grid_point_double_mesh` (`src/kgrid.c:68-83`) halves each
+    //     component, giving {2,1,0}, and `modulo_i3` (:96-106) leaves it alone;
+    //   * `get_grid_point_single_mesh` (`src/kgrid.c:88-89`) returns
+    //     `address[2] * mesh[0] * mesh[1] + address[1] * mesh[0] + address[0]`,
+    //     which is 0 * 16 + 1 * 4 + 2 = 6.
+    //
+    // That is an independent derivation, not a re-read of what the call
+    // returned, which is what makes it a check rather than an echo.
     const mesh: [3]c_int = .{ 4, 4, 4 };
     const address: [3]c_int = .{ 2, 1, 0 };
-    const index = try spglib.gridPointFromAddress(address, mesh);
-    try testing.expect(index < 64);
-
-    // The 32-bit and the dense entry points must agree.
-    try testing.expectEqual(index, spglib.c.spg_get_dense_grid_point_from_address(&address, &mesh));
-    // spg_get_grid_point_from_address returns C int, the dense one size_t.
     try testing.expectEqual(
-        index,
-        @as(usize, @intCast(spglib.c.spg_get_grid_point_from_address(&address, &mesh))),
+        @as(usize, 6),
+        try spglib.gridPointFromAddress(address, mesh),
     );
 
+    // A negative address, where `modulo_i3` is the step that decides the
+    // answer. Address {-1,0,0} doubles to {-2,0,0}; nothing exceeds the mesh, so
+    // the reduction does nothing; halving gives {-1,0,0}; and C's truncating
+    // remainder leaves -1 % 4 as -1, which `modulo_i3` then lifts to 3. The
+    // index is therefore 3. Skipping `modulo_i3` would answer -1, and reducing
+    // a component that merely *equals* the mesh would answer 62, so this one
+    // case separates two different mistakes.
+    try testing.expectEqual(
+        @as(usize, 3),
+        try spglib.gridPointFromAddress(.{ -1, 0, 0 }, mesh),
+    );
+
+    // A component above the mesh, where the reduction is what decides the
+    // answer. Address {3,0,0} doubles to {6,0,0}; 6 exceeds 4, so
+    // `reduce_grid_address_double` subtracts 2 * 4 and produces {-2,0,0}. The
+    // rest of the trace then matches the case above and the index is 3 again.
+    // The pair is deliberate: {2,1,0} and {3,0,0} are both in range and reach
+    // the same index, while only the second one crosses `mesh[i]`, so a
+    // reduction that used `>=` instead of `>` would answer 62 for {2,1,0} and
+    // disagree here.
+    try testing.expectEqual(
+        @as(usize, 3),
+        try spglib.gridPointFromAddress(.{ 3, 0, 0 }, mesh),
+    );
+
+    // Further out of the mesh again, and the point of the case: upstream folds
+    // an address the mesh does not bound rather than refusing it. {5,0,0}
+    // doubles to {10,0,0}; 10 exceeds 4, so the reduction subtracts 8 once and
+    // leaves {2,0,0}; halving gives {1,0,0}; 1 % 4 is 1; the index is 1. An
+    // address that named no mesh point would have no answer to compare with, so
+    // this is the behaviour a caller folding reduced-zone addresses relies on.
+    try testing.expectEqual(
+        @as(usize, 1),
+        try spglib.gridPointFromAddress(.{ 5, 0, 0 }, mesh),
+    );
+
+    // The two refusals left, both because the arithmetic upstream performs is
+    // `int` in C. A zero mesh entry is a division by zero in `modulo_i3`
+    // (src/kgrid.c:100), and an entry above 2^30 - 1 cannot be doubled by
+    // `reduce_grid_address_double` (src/kgrid.c:125) without overflowing.
     try testing.expectError(error.MeshOutOfRange, spglib.gridPointFromAddress(address, .{ 4, 0, 4 }));
     try testing.expectError(
+        error.MeshOutOfRange,
+        spglib.gridPointFromAddress(address, .{ 4, 1073741824, 4 }),
+    );
+
+    // The same ceiling on the address side: 2^30 doubled is 2^31, which the
+    // `int` of `address[i] * 2` (src/kgrid.c:39) cannot hold.
+    try testing.expectError(
         error.GridAddressOutOfRange,
-        spglib.gridPointFromAddress(.{ 5, 0, 0 }, mesh),
+        spglib.gridPointFromAddress(.{ 1073741824, 0, 0 }, mesh),
     );
 }
 
 test "the dataset reports the standardised perovskite cell" {
+    nativeReady();
+
     const dataset = try spglib.getDataset(fixtures.perovskite, 1e-5);
     defer dataset.deinit();
 
@@ -729,6 +873,71 @@ test "the dataset reports the standardised perovskite cell" {
     try testing.expect(orbits[0] != orbits[2]);
     try testing.expectEqual(orbits[2], orbits[3]);
     try testing.expectEqual(orbits[2], orbits[4]);
+}
+
+test "a dataset is released by the provider that produced it" {
+    nativeReady();
+
+    // `spg_get_dataset` allocates with the provider's own `malloc`
+    // (`src/spglib.c:234`) and `spg_free_dataset` releases with that same
+    // provider's `free` (`src/spglib.c:293-333`). There is no allocator
+    // argument and no hook anywhere in the header, so the pairing is
+    // unconditional and the only thing that can break it is routing one of the
+    // two to something else. In a runtime-loading build both calls go through
+    // one table that `load` filled once and never replaces, so a dataset
+    // cannot end up being freed by a different library.
+    //
+    // A wrong free does not fail loudly here: it corrupts a heap the caller
+    // does not own, and the damage shows up later as a wrong answer. So this
+    // runs the round trip many times over and re-checks a fixed known answer
+    // after every single one. A free routed to the wrong entry point, or to a
+    // Zig allocator, cannot survive that; a correct one can, because each
+    // iteration fully releases what the previous one allocated.
+    //
+    // The magnetic dataset is included because it is a different struct with a
+    // different release function (`spg_free_magnetic_dataset`,
+    // `src/spglib.c:335-365`), so the two routes cannot have been confused
+    // once and not the other.
+    var round: usize = 0;
+    while (round < 64) : (round += 1) {
+        const dataset = try spglib.getDataset(fixtures.rutile, 1e-5);
+        try testing.expectEqual(@as(c_int, 136), dataset.spacegroupNumber());
+        try testing.expectEqual(@as(usize, 16), dataset.operationCount());
+        dataset.deinit();
+
+        const magnetic = try spglib.getMagneticDataset(
+            fixtures.rutile,
+            &fixtures.rutile_spins.antiferromagnetic,
+            1e-5,
+        );
+        try testing.expectEqual(@as(c_int, 1158), magnetic.uniNumber());
+        try testing.expectEqual(@as(c_int, 3), magnetic.magneticType());
+        magnetic.deinit();
+    }
+
+    // The raw C route allocates and frees through the same two entry points,
+    // and it is the route a caller uses when it wants the `SpglibDataset`
+    // itself rather than the typed wrapper. Mixing the two routes - a raw
+    // allocation released by the facade, or the reverse - is exactly the
+    // cross-provider mistake the single-table rule rules out, so this exercises
+    // them side by side rather than one at a time.
+    var mixed: usize = 0;
+    while (mixed < 16) : (mixed += 1) {
+        const raw = spglib.c.spg_get_dataset(
+            fixtures.perovskite.latticePtr(),
+            fixtures.perovskite.positionPtr(),
+            fixtures.perovskite.typePtr(),
+            @intCast(fixtures.perovskite.atomCount()),
+            1e-5,
+        );
+        if (@intFromPtr(raw) == 0) return error.TestUnexpectedResult;
+        try testing.expectEqual(@as(c_int, 221), raw.*.spacegroup_number);
+        spglib.c.spg_free_dataset(raw);
+
+        const wrapped = try spglib.getDataset(fixtures.perovskite, 1e-5);
+        try testing.expectEqual(@as(c_int, 221), wrapped.spacegroupNumber());
+        wrapped.deinit();
+    }
 }
 
 /// Asserts that every operation maps every atom onto an atom of the same type,

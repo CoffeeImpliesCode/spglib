@@ -84,7 +84,25 @@ env
 .venv
 .env
 
+
+# Fork additions below. SPDX-License-Identifier: BSD-3-Clause for the entries
+# this fork added; the upstream entries above are unchanged and keep upstream's
+# own terms. Nothing upstream is removed or reordered to make room.
+
 # Zig build (fork additions, upstream conventions kept above)
 .zig-cache/
 zig-cache/
 zig-out/
+# A package materialised by `zig fetch` beside a build root. Not source.
+zig-pkg/
+
+# Nix and devenv (fork additions). `devenv/` is the generated shell state,
+# `.direnv/` is what direnv leaves behind, and `result`/`result-*` are the
+# symlinks `nix build` and `nix-build` put in this directory.
+.direnv/
+devenv/
+# devenv writes a hidden sibling of its own state directory too.
+.devenv/
+result
+result-*
+.nix-build/
