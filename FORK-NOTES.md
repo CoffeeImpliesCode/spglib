@@ -25,8 +25,7 @@ The fork patches two upstream C files. Other files under `src/`, `include/` and 
 - Zig 0.17 run arguments use `addPassthruArgs`; formatter paths use `b.pathList`.
 - The runtime generator uses Zig 0.17 AST parse options and run-step path arguments.
 - Error-code conversion uses Zig 0.17's `@Int` builtin for the translated C type's unsigned width.
-- The pinned Nixpkgs revision lacks Zig 0.17.0; the flake and devenv extend its Zig recipe with the upstream source hash and 0.17 langref command.
-- Debug builds use Zig's safe optimization mode for Zig callers and disable C sanitization. The C core keeps its requested optimization and debug flags. This workaround follows an extern-call argument defect observed with Zig 0.16.0 on `x86_64-linux-gnu`.
+- Debug builds use Zig's safe optimization mode for Zig callers and disable C sanitization. The C core keeps its requested optimization and debug flags. This workaround follows an extern-call argument defect on `x86_64-linux-gnu` (observed with Zig 0.16; not rechecked on 0.17).
 
 ## Platform boundaries
 

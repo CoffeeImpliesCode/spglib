@@ -458,7 +458,7 @@ fn addExecutableArtifact(
     });
 }
 
-/// Work around Zig 0.16 Debug mis-marshalling C calls with seven or more integer-class arguments.
+/// Work around Debug mis-marshalling C calls with seven or more integer-class arguments (observed with Zig 0.16; not rechecked on 0.17).
 /// Optimize only Zig callers; keep the C library at the requested mode.
 fn zigCallerOptimize(host: ?std.lang.Optimize) ?std.lang.Optimize {
     return if (host != null and host.? == .debug) .safe else host;
