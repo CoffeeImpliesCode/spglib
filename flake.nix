@@ -1,9 +1,9 @@
 {
-  description = "spglib 2.7.0 packaged from source as a Zig 0.16 SDK, static and shared";
+  description = "spglib 2.7.0 packaged from source as a Zig 0.17 SDK, static and shared";
 
   inputs = {
     # Pin nixpkgs by revision.
-    nixpkgs.url = "github:NixOS/nixpkgs/c7def046b9a883d46974757852106483d741586f";
+    nixpkgs.url = "github:NixOS/nixpkgs/02c087f3fe673c9e317f206a627cb6b910336dbe";
   };
 
   outputs = { self, nixpkgs }:
@@ -21,13 +21,13 @@
     {
       packages = forAllSystems (pkgs:
         let
-          # Use the pinned Zig 0.16.0 toolchain.
+          # Use the pinned Zig 0.17.0 toolchain.
           static = pkgs.callPackage ./package.nix {
-            zig = pkgs.zig_0_16;
+            zig = pkgs.zig_0_17;
             linkage = "static";
           };
           shared = pkgs.callPackage ./package.nix {
-            zig = pkgs.zig_0_16;
+            zig = pkgs.zig_0_17;
             linkage = "dynamic";
           };
         in
@@ -41,7 +41,7 @@
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           packages = [
-            pkgs.zig_0_16
+            pkgs.zig_0_17
             pkgs.patch
             pkgs.git
           ];

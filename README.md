@@ -1,7 +1,7 @@
 # spglib
 
 spglib is a C library for finding and handling crystal symmetries.
-This package builds upstream spglib v2.7.0 with Zig 0.16.0 and adds a typed Zig facade.
+This package builds upstream spglib v2.7.0 with Zig 0.17.0 and adds a typed Zig facade.
 
 ## Source deviations from upstream
 
@@ -18,7 +18,7 @@ All other bytes under `src/`, `include/` and `database/` match the pin. `.gitign
 * The native library and Zig module are named `spglib`; upstream CMake names the library `symspg`. The installed `spglib.pc` uses `-lspglib`.
 * `-Dlinkage=static` is the default; `dynamic` builds a shared library. `-Druntime=true` dispatches native calls through an explicit runtime loader and is independent of linkage. Runtime loading is refused with system-library mode.
 * `-fsys=spglib` uses the installed header and library via pkg-config; it builds no native artifact and does not include this fork's patched C sources.
-* The build links `libm` on Linux, the BSDs and illumos. For Zig 0.16.0 Debug builds, Zig callers use `ReleaseSafe` and C sanitization is disabled to work around an extern-call argument defect; the C core retains the requested optimization and `SPGDEBUG`.
+* The build links `libm` on Linux, the BSDs and illumos. Debug builds use Zig's safe optimization mode for Zig callers and disable C sanitization to retain a workaround for an extern-call argument defect observed with Zig 0.16.0; the C core retains the requested optimization and `SPGDEBUG`.
 
 ## Support matrix
 

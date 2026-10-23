@@ -4,10 +4,10 @@
     // relative path and uses only the exported module and artifact.
     .name = .spglib_consumer,
     .version = "0.0.0",
-    // The value the pinned Zig 0.16.0 compiler reports for this package.
+    // The value the pinned Zig 0.17.0 compiler reports for this package.
     // Changing this has security and trust implications.
     .fingerprint = 0x325ce7e12bdb3825,
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0",
     .dependencies = .{
         .spglib = .{ .path = "../.." },
     },

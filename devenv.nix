@@ -5,11 +5,11 @@
 
 let
   static = pkgs.callPackage ./package.nix {
-    zig = pkgs.zig_0_16;
+    zig = pkgs.zig_0_17;
     linkage = "static";
   };
   shared = pkgs.callPackage ./package.nix {
-    zig = pkgs.zig_0_16;
+    zig = pkgs.zig_0_17;
     linkage = "dynamic";
   };
 
@@ -28,7 +28,7 @@ in
 
 {
   packages = [
-    pkgs.zig_0_16
+    pkgs.zig_0_17
     # Provenance checks require `patch` and `git`.
     pkgs.patch
     pkgs.git
@@ -36,10 +36,10 @@ in
 
   assertions = [
     {
-      assertion = pkgs.zig_0_16.version == "0.16.0";
+      assertion = pkgs.zig_0_17.version == "0.17.0";
       message = ''
-        The spglib SDK is built with Zig 0.16.0; the shell provides
-        ${pkgs.zig_0_16.version}. Fix devenv.yaml rather than building with a
+        The spglib SDK is built with Zig 0.17.0; the shell provides
+        ${pkgs.zig_0_17.version}. Fix devenv.yaml rather than building with a
         different compiler.
       '';
     }

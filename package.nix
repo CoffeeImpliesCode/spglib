@@ -10,8 +10,8 @@
 
 assert lib.assertMsg (linkage == "static" || linkage == "dynamic")
   "spglib: linkage must be \"static\" or \"dynamic\", got ${builtins.toString linkage}";
-assert lib.assertMsg (zig.version == "0.16.0")
-  "spglib: built with Zig 0.16.0, got ${zig.version}";
+assert lib.assertMsg (zig.version == "0.17.0")
+  "spglib: built with Zig 0.17.0, got ${zig.version}";
 
 let
   # Read the package version from the manifest; build.zig checks the upstream pin.
@@ -157,7 +157,7 @@ stdenv.mkDerivation {
   meta = {
     description = "spglib, a crystal symmetry library, built from this repository's source";
     longDescription = ''
-      spglib ${version} as a Zig 0.16 SDK: the 23 upstream C translation units
+      spglib ${version} as a Zig 0.17 SDK: the 23 upstream C translation units
       from src/, the public header include/spglib.h, the generated
       spglib/version.h, link metadata in lib/pkgconfig/spglib.pc, and BSD
       3-Clause licence material under share/licenses/spglib. README.md has the

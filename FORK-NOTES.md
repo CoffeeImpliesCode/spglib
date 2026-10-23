@@ -21,12 +21,16 @@ The fork patches two upstream C files. Other files under `src/`, `include/` and 
 - The install includes public headers and licence records. Database tables live in C sources, so the install has no runtime data.
 - `-Dlinkage=static` is the default. `dynamic` builds a shared library. `-Druntime=true` selects explicit provider loading, independent of linkage.
 - `-fsys=spglib` uses the installed header and library through pkg-config. It builds no native artifact. `-fno-sys=spglib` forces bundled sources. System mode cannot use runtime loading because installed headers lack provider-version macros.
-- The consumer uses a nested build to avoid a manifest cycle. That build gets the same target, CPU, optimization, linkage, runtime and system-mode settings. It also gets executor, cache, prefix and caller arguments. It runs only when an enabled executor can run the target.
-- Debug builds use ReleaseSafe for Zig callers and disable C sanitization. The C core keeps its requested optimization and debug flags. This works around an extern-call argument defect that Zig 0.16.0 showed on `x86_64-linux-gnu`.
+- The consumer uses a nested build to avoid a manifest cycle. It receives target, CPU, optimization, linkage and runtime/system settings, plus lazy local-cache and prefix paths and caller arguments. Global-cache and library-directory settings use the inherited `ZIG_GLOBAL_CACHE_DIR` and `ZIG_LIB_DIR` environment variables.
+- Zig 0.17 run arguments use `addPassthruArgs`; formatter paths use `b.pathList`.
+- The runtime generator uses Zig 0.17 AST parse options and run-step path arguments.
+- Error-code conversion uses Zig 0.17's `@Int` builtin for the translated C type's unsigned width.
+- The pinned Nixpkgs revision lacks Zig 0.17.0; the flake and devenv extend its Zig recipe with the upstream source hash and 0.17 langref command.
+- Debug builds use Zig's safe optimization mode for Zig callers and disable C sanitization. The C core keeps its requested optimization and debug flags. This workaround follows an extern-call argument defect observed with Zig 0.16.0 on `x86_64-linux-gnu`.
 
 ## Platform boundaries
 
 - `check-targets` compiles but does not run `x86_64-linux-gnu`, `aarch64-linux-gnu`, `aarch64-macos-none`, `x86_64-windows-gnu`, `riscv64-linux-gnu` and `wasm32-wasi`.
-- Execution needs the native host or an enabled QEMU, Wasmtime, Wine or Darling executor. Without one, the consumer step installs the target instead of running it.
+- Zig 0.17 keeps executor selection in the make phase, outside the build script. The nested consumer therefore runs only direct native targets and installs other targets under the outer prefix.
 - Dynamic delivery needs a dynamic linker. WASI supports static delivery only. Windows uses the MinGW GNU target. This package does not support MSVC.
 - macOS builds link CoreFoundation for CCTZ timezone lookup. Flake outputs cover `x86_64-linux`, `aarch64-linux`, `x86_64-darwin` and `aarch64-darwin`.

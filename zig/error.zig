@@ -1,5 +1,3 @@
-const std = @import("std");
-
 const c = @import("c");
 const ffi = @import("ffi.zig");
 
@@ -112,9 +110,9 @@ fn fromRaw(raw: RawError) ErrorCode {
 }
 
 fn toRaw(code: ErrorCode) RawError {
-    const value: std.meta.Int(.unsigned, @bitSizeOf(RawError)) = @intCast(@intFromEnum(code));
+    const value: @Int(.unsigned, @bitSizeOf(RawError)) = @intCast(@backingInt(code));
     // Translate-c may represent the C error type as an enum or integer.
-    if (@typeInfo(RawError) == .@"enum") return @enumFromInt(value);
+    if (@typeInfo(RawError) == .@"enum") return @fromBackingInt(@intCast(value));
     return @intCast(value);
 }
 

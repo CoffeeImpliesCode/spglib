@@ -89,7 +89,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     // Static is the default; dynamic changes only the library and pkg-config entries.
     const linkage = b.option(
-        std.builtin.LinkMode,
+        std.lang.LinkMode,
         "linkage",
         "Deliver libspglib as a static archive (default) or as a shared library",
     ) orelse .static;
@@ -113,7 +113,7 @@ pub fn build(b: *std.Build) void {
         @panic("build.zig.zon .version no longer matches the pinned upstream release in UPSTREAM.md");
     }
 
-    const c_flags: []const []const u8 = if (optimize == .Debug) &debug_flags else &release_flags;
+    const c_flags: []const []const u8 = if (optimize == .debug) &debug_flags else &release_flags;
 
     // Generate `version.h` from the manifest and pinned upstream identity.
     const version_header = b.addWriteFiles().add("version.h", b.fmt(
@@ -177,7 +177,7 @@ pub fn build(b: *std.Build) void {
     const smoke_exe = addExecutableArtifact(b, "zig/examples/smoke.zig", "spglib-smoke", spglib.module, native_tests);
     const run_smoke = b.addRunArtifact(smoke_exe);
     smoke_step.dependOn(&run_smoke.step);
-    if (b.args) |args| run_smoke.addArgs(args);
+    run_smoke.addPassthruArgs();
 
     const check_step = b.step("check", "Compile the library, the public facade and the example without running them");
     check_step.dependOn(analyze(b, "analyze-native", spglib.module, native_tests));
@@ -205,17 +205,17 @@ pub fn build(b: *std.Build) void {
         check_targets_step.dependOn(analyze(b, b.fmt("analyze-{s}", .{triple}), cross_package.module, cross_host));
     }
 
-    // Build the consumer separately to avoid a manifest cycle.
-    // Forward resolved options and arguments; run when executable, otherwise install.
+    // Forward resolved options and arguments; run only for direct native execution.
+    // Otherwise install the target under the outer prefix.
     const consumer_step = b.step("consumer", "Build or run the consumer package in zig/consumer against the exported module and artifact");
     consumer_step.dependOn(&runConsumer(b, target, optimize, runtime_loaded, linkage, use_system_spglib).step);
 
     // Format the build-runner import with the public Zig sources.
-    const fmt_paths = [_][]const u8{ "build.zig", "build.zig.zon", "zig", "runtime" };
+    const fmt_paths = b.pathList(&.{ "build.zig", "build.zig.zon", "zig", "runtime" });
     const fmt_check = b.step("fmt-check", "Check Zig formatting");
-    fmt_check.dependOn(&b.addFmt(.{ .paths = &fmt_paths, .check = true }).step);
+    fmt_check.dependOn(&b.addFmt(.{ .paths = fmt_paths, .check = true }).step);
     const fmt = b.step("fmt", "Format Zig sources in place");
-    fmt.dependOn(&b.addFmt(.{ .paths = &fmt_paths }).step);
+    fmt.dependOn(&b.addFmt(.{ .paths = fmt_paths }).step);
 }
 
 /// Licence and provenance records installed with every delivered library.
@@ -239,7 +239,7 @@ fn needsLibM(target: std.Build.ResolvedTarget) bool {
 
 const InstallOptions = struct {
     target: std.Build.ResolvedTarget,
-    linkage: std.builtin.LinkMode,
+    linkage: std.lang.LinkMode,
     version: std.SemanticVersion,
     version_header: std.Build.LazyPath,
 };
@@ -335,14 +335,14 @@ fn parseTriple(b: *std.Build, triple: []const u8) std.Target.Query {
     };
 }
 
-/// Build the consumer in a separate graph to avoid a manifest dependency cycle.
-/// Forward resolved settings and arguments; run when executable, otherwise install.
+/// Build the consumer separately to avoid a manifest dependency cycle.
+/// Forward resolved settings and arguments; install when direct execution is unavailable.
 fn runConsumer(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
     runtime_loaded: bool,
-    linkage: std.builtin.LinkMode,
+    linkage: std.lang.LinkMode,
     use_system_spglib: bool,
 ) *std.Build.Step.Run {
     const query = target.query;
@@ -356,7 +356,7 @@ fn runConsumer(
     const run = b.addSystemCommand(&.{ b.graph.zig_exe, "build" });
     run.setName("consumer package");
     run.setCwd(b.path("zig/consumer"));
-    run.addArg(if (hostCanExecute(b, target)) "run" else "install");
+    run.addArg(if (hostCanExecute(b, target, linkage)) "run" else "install");
     // Pass each build option as one argument.
     run.addArg(b.fmt("-Dtarget={s}", .{triple}));
     run.addArg(b.fmt("-Dcpu={s}", .{cpu}));
@@ -368,66 +368,43 @@ fn runConsumer(
     run.addArg(b.fmt("-Dlinkage={s}", .{@tagName(linkage)}));
     // Forward the selected system-library mode; it is a build-runner flag, not a dependency option.
     run.addArg(if (use_system_spglib) "-fsys=spglib" else "-fno-sys=spglib");
-    // Forward only enabled executors and configured libc runtimes.
-    if (b.enable_darling) run.addArg("-fdarling");
-    if (b.enable_qemu) run.addArg("-fqemu");
-    if (b.enable_rosetta) run.addArg("-frosetta");
-    if (b.enable_wasmtime) run.addArg("-fwasmtime");
-    if (b.enable_wine) run.addArg("-fwine");
-    if (b.libc_runtimes_dir) |runtimes| run.addArgs(&.{ "--libc-runtimes", runtimes });
     // Keep the nested job count and summary explicit.
     run.addArg("-j8");
     run.addArgs(&.{ "--summary", "all" });
-    // Give the nested build its own local cache directory.
-    if (b.cache_root.path) |cache| {
-        run.addArg("--cache-dir");
-        run.addArg(b.fmt("{s}/consumer", .{cache}));
-    }
-    // Share the selected global cache; it holds packages fetched by both build graphs.
-    if (b.graph.global_cache_root.path) |global_cache| {
-        run.addArg("--global-cache-dir");
-        run.addArg(global_cache);
-    }
-    // Forward the resolved install prefix, made absolute against the outer build root.
-    const default_prefix = b.build_root.join(b.allocator, &.{"zig-out"}) catch @panic("OOM");
-    if (!std.mem.eql(u8, b.install_prefix, default_prefix)) {
-        const prefix = if (std.fs.path.isAbsolute(b.install_prefix))
-            b.install_prefix
-        else
-            b.pathJoin(&.{ b.graph.cache.cwd, b.install_prefix });
-        run.addArg("--prefix");
-        run.addArg(prefix);
-    }
-    // Forward caller arguments after `--`.
-    if (b.args) |args| {
-        run.addArg("--");
-        run.addArgs(args);
-    }
+    // Resolve cache and install paths in the make phase.
+    run.addArg("--cache-dir");
+    run.addDirectoryArg2(.{
+        .relative = .{ .base = .local_cache, .sub_path = "consumer" },
+    }, .{ .make_absolute = true });
+    // Global-cache and library-directory overrides are inherited through the environment.
+    run.addArg("--prefix");
+    run.addDirectoryArg2(.{
+        .relative = .{ .base = .install_prefix },
+    }, .{ .make_absolute = true });
+    run.addArg("--");
+    // The nested build receives caller arguments after its own `--`.
+    run.addPassthruArgs();
     // The nested build is the step's only observable effect.
     run.has_side_effects = true;
     return run;
 }
 
-/// Use enabled external executors; `isNative` rejects explicit triples such as `x86_64-linux-gnu`.
-/// QEMU needs libc runtimes for GNU libc; without an executor, compile and install instead.
-fn hostCanExecute(b: *std.Build, target: std.Build.ResolvedTarget) bool {
+/// Returns whether Zig can run the target directly on this host.
+fn hostCanExecute(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    linkage: std.lang.LinkMode,
+) bool {
     const host = &b.graph.host.result;
-    const candidate = &target.result;
     const options: std.zig.system.GetExternalExecutorOptions = .{
-        .allow_darling = b.enable_darling,
-        .allow_qemu = b.enable_qemu,
-        .allow_wasmtime = b.enable_wasmtime,
-        .allow_wine = b.enable_wine,
-        .qemu_fixes_dl = candidate.isGnuLibC() and b.libc_runtimes_dir != null,
+        .host_cpu_arch = host.cpu.arch,
+        .host_os_tag = host.os.tag,
+        .link_mode = linkage,
         .link_libc = true,
     };
-    return switch (std.zig.system.getExternalExecutor(b.graph.io, host, candidate, options)) {
-        .native, .rosetta => true,
-        // QEMU needs configured libc runtimes for GNU libc targets.
-        .qemu => !candidate.isGnuLibC() or b.libc_runtimes_dir != null,
-        .wine, .wasmtime, .darling => true,
-        // No enabled executor can run these targets.
-        .bad_dl, .bad_os_or_cpu => false,
+    return switch (std.zig.system.getExternalExecutor(b.graph.io, &target.result, options)) {
+        .native => true,
+        else => false,
     };
 }
 
@@ -439,7 +416,7 @@ fn addTestArtifact(
     test_host: *std.Build.Module,
 ) *std.Build.Step.Compile {
     return b.addTest(.{
-        .name = b.fmt("{s}{s}", .{ name_prefix, std.fs.path.stem(test_file) }),
+        .name = b.fmt("{s}{s}", .{ name_prefix, std.Io.Dir.path.stem(test_file) }),
         .root_module = b.createModule(.{
             .target = test_host.resolved_target,
             .optimize = zigCallerOptimize(test_host.optimize),
@@ -483,8 +460,8 @@ fn addExecutableArtifact(
 
 /// Work around Zig 0.16 Debug mis-marshalling C calls with seven or more integer-class arguments.
 /// Optimize only Zig callers; keep the C library at the requested mode.
-fn zigCallerOptimize(host: ?std.builtin.OptimizeMode) ?std.builtin.OptimizeMode {
-    return if (host != null and host.? == .Debug) .ReleaseSafe else host;
+fn zigCallerOptimize(host: ?std.lang.Optimize) ?std.lang.Optimize {
+    return if (host != null and host.? == .debug) .safe else host;
 }
 
 const SpglibOptions = struct {

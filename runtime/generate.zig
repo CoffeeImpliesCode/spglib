@@ -209,7 +209,7 @@ fn generate(
     options: Options,
 ) Failure!struct { dispatch: []const u8, native: []const u8 } {
     const source_z = try readSentinel(io, arena, options.translate);
-    var tree = try Ast.parse(arena, source_z, .zig);
+    var tree = try Ast.parse(arena, source_z, .{ .mode = .zig });
     defer tree.deinit(arena);
 
     if (tree.errors.len != 0) {
@@ -463,7 +463,7 @@ fn planSignature(
             if (!std.mem.eql(u8, tree.tokenSlice(token), "noalias")) return error.UnsupportedDeclaration;
             try params.appendSlice(arena, "noalias ");
         }
-        const argument = try std.fmt.allocPrint(arena, "rt_p{d}", .{arguments.items.len});
+        const argument = try arena.print("rt_p{d}", .{arguments.items.len});
         try params.appendSlice(arena, argument);
         try params.appendSlice(arena, ": ");
         try params.appendSlice(arena, tokenRangeText(tree, tree.firstToken(type_node), tree.lastToken(type_node)));
@@ -485,9 +485,9 @@ fn planSignature(
     }
     // Variadic wrappers receive trailing arguments as a tuple.
     const tail = if (variadic)
-        try std.fmt.allocPrint(arena, " {s}", .{return_text})
+        try arena.print(" {s}", .{return_text})
     else
-        try std.fmt.allocPrint(arena, " callconv({s}) {s}", .{ calling_convention, return_text });
+        try arena.print(" callconv({s}) {s}", .{ calling_convention, return_text });
     const rparen = matchingRParenToken(tree, proto.lparen);
     const native_params = tokenRangeText(tree, proto.lparen, rparen);
     decl.variadic = variadic;
@@ -495,7 +495,7 @@ fn planSignature(
     decl.params = params.items;
     decl.tail = tail;
     decl.arguments = arguments.items;
-    decl.field_type = try std.fmt.allocPrint(arena, "*const fn {s} callconv({s}) {s}", .{
+    decl.field_type = try arena.print("*const fn {s} callconv({s}) {s}", .{
         native_params, calling_convention, return_text,
     });
 }
@@ -572,9 +572,9 @@ fn planVariable(
     const type_text = try dataTypeText(arena, tree, var_decl, name, last);
     const is_mutable = std.mem.eql(u8, tree.tokenSlice(mut_token), "var");
     decl.field_type = if (is_mutable)
-        try std.fmt.allocPrint(arena, "*{s}", .{type_text})
+        try arena.print("*{s}", .{type_text})
     else
-        try std.fmt.allocPrint(arena, "*const {s}", .{type_text});
+        try arena.print("*const {s}", .{type_text});
     return decl;
 }
 

@@ -122,7 +122,7 @@ pub fn build(b: *std.Build) void {
     // program has no provider without that flag or `SPGLIB_TEST_PROVIDER`
     // (`src/main.zig:11-12`). Dropping it leaves the program printing that it
     // wants a flag the caller just passed.
-    if (b.args) |args| run.addArgs(args);
+    run.addPassthruArgs();
     b.step("run", "Run the consumer against the spglib fork").dependOn(&run.step);
 
     b.installArtifact(executable);

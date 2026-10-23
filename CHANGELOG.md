@@ -2,8 +2,10 @@
 
 Fork changes from upstream spglib `v2.7.0`, newest first.
 
+- Port to Zig 0.17.0.
+- The nested consumer runs only when Zig identifies direct native execution; otherwise it installs under the outer prefix.
 - `-fsys=spglib` links the installed library through pkg-config, translates its target-specific header, retains target and optimization settings, and is incompatible with runtime loading.
-- Nested consumer builds forward target, CPU, optimization, linkage, runtime/system mode, executor, caches, install prefix, job settings, and caller arguments.
+- Nested consumer builds forward target, CPU, optimization, linkage, runtime/system mode, cache paths, install prefix, job settings, and caller arguments.
 - The raw C API documents the six standardization calls that write through lattice and type inputs; typed calls copy into `OwnedCell`.
 - Added cache, job, summary, and install-prefix settings to the canonical devenv build tasks.
 - Runtime mode (`-Druntime`) exposes `load`, `loadedSource`, and `runtime_loaded`; providers are explicit, and missing optional symbols fail when called.

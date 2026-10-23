@@ -623,10 +623,11 @@ test "antiferromagnetic bcc iron has an anti-translation with time reversal" {
 test "magnetic tensor counts and ranks are validated" {
     nativeReady();
 
-    // One double per atom at rank 0: any other count is a caller mistake.
-    // The spin array is bound first: a container-level array decl cannot be
-    // sliced through the decl path directly.
     const gray = fixtures.rutile_spins.gray;
+    const two_components: [6 * 2]f64 = @splat(0);
+    const three_components: [6 * 3]f64 = @splat(0);
+    const sixty_four_components: [6 * 64]f64 = @splat(0);
+
     try testing.expectError(
         error.TensorCountMismatch,
         spglib.getMagneticDataset(fixtures.rutile, gray[0..5], 1e-5),
@@ -634,7 +635,7 @@ test "magnetic tensor counts and ranks are validated" {
     // Three doubles per atom at rank 1.
     try testing.expectError(
         error.TensorCountMismatch,
-        spglib.getMagneticDatasetWithTensors(fixtures.rutile, &([_]f64{0} ** (6 * 2)), .{
+        spglib.getMagneticDatasetWithTensors(fixtures.rutile, &two_components, .{
             .rank = 1,
             .symprec = 1e-5,
         }),
@@ -643,14 +644,14 @@ test "magnetic tensor counts and ranks are validated" {
     // any C call rather than reaching unallocated tensor storage.
     try testing.expectError(
         error.TensorRankOutOfRange,
-        spglib.getMagneticDatasetWithTensors(fixtures.rutile, &([_]f64{0} ** (6 * 3)), .{
+        spglib.getMagneticDatasetWithTensors(fixtures.rutile, &three_components, .{
             .rank = 2,
             .symprec = 1e-5,
         }),
     );
     try testing.expectError(
         error.TensorRankOutOfRange,
-        spglib.getMagneticDatasetWithTensors(fixtures.rutile, &([_]f64{0} ** (6 * 64)), .{
+        spglib.getMagneticDatasetWithTensors(fixtures.rutile, &sixty_four_components, .{
             .rank = 4,
             .symprec = 1e-5,
         }),
@@ -660,7 +661,7 @@ test "magnetic tensor counts and ranks are validated" {
 test "a rank-1 search reports three tensor components per atom" {
     nativeReady();
 
-    const tensors = [_]f64{0} ** (6 * 3);
+    const tensors: [6 * 3]f64 = @splat(0);
     const dataset = try spglib.getMagneticDatasetWithTensors(fixtures.rutile, &tensors, .{
         .rank = 1,
         .symprec = 1e-5,

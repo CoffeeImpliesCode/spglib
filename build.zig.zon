@@ -9,7 +9,7 @@
     .version = "2.7.0",
     // Value reported by the toolchain for this package name.
     .fingerprint = 0x35191367c8f3aeca, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0",
     // The nested consumer owns its dependency manifest to avoid a cycle.
     .paths = .{
         "build.zig",
