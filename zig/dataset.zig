@@ -1,9 +1,3 @@
-// Zig facade for spglib: symmetry datasets and cell standardisation.
-//
-// `Dataset` owns memory that upstream allocated with `malloc`. Every borrow
-// returned from it is valid until `deinit`, and `deinit` is the only way to
-// release it; it calls `spg_free_dataset`, never a Zig allocator.
-
 const std = @import("std");
 
 const cell_mod = @import("cell.zig");
@@ -16,27 +10,14 @@ const Operations = symmetry.Operations;
 const c = @import("c");
 const ffi = @import("ffi.zig");
 
-/// A symmetry dataset spglib allocated with `malloc`.
-///
-/// Every slice an accessor hands out borrows this dataset's storage and is
-/// invalid once `deinit` runs. The value is single-owner: a copy duplicates the
-/// handle to one allocation, so `deinit` runs exactly once, on one copy only,
-/// and any other copy is a dangling handle from that moment. `deinit` calls
-/// `spg_free_dataset`, never a Zig allocator, so a Zig leak checker cannot
-/// observe these allocations.
+/// Owns a spglib-allocated dataset; release it once with `deinit` on the original value.
+/// Accessor slices borrow its storage until release; `deinit` calls `spg_free_dataset`.
 pub const Dataset = struct {
-    /// The upstream `SpglibDataset` every accessor reads. The field is
-    /// reachable, so a caller may replace it; a value that did not come from a
-    /// successful dataset call breaks every accessor, and `deinit` frees
-    /// whatever it points at.
+    /// Raw upstream handle; replacing it breaks accessors and changes what `deinit` frees.
     raw: *c.SpglibDataset,
 
-    /// Releases the dataset and every array inside it, and leaves `Dataset`
-    /// unusable.
-    ///
-    /// Call this once, on the owner. A second call, or a call through a copy
-    /// taken before the first, frees the same bytes twice, and every slice
-    /// already handed out dangles afterwards.
+    /// Frees the dataset with `spg_free_dataset`; call once on the owner.
+    /// Accessor slices become invalid after release.
     pub fn deinit(self: Dataset) void {
         c.spg_free_dataset(self.raw);
     }
@@ -51,33 +32,27 @@ pub const Dataset = struct {
         return self.raw.hall_number;
     }
 
-    /// International Hermann-Mauguin symbol, borrowed from the dataset's own
-    /// `international_symbol` field and ending at the first NUL byte. Invalid
-    /// after `deinit`.
+    /// Borrows the NUL-terminated International symbol; valid until `deinit`.
     pub fn internationalSymbol(self: Dataset) []const u8 {
         return cString(self.raw.international_symbol[0..]);
     }
 
-    /// Hall symbol of the setting the search landed on, borrowed like
-    /// `internationalSymbol`.
+    /// Borrows the Hall symbol until `deinit`.
     pub fn hallSymbol(self: Dataset) []const u8 {
         return cString(self.raw.hall_symbol[0..]);
     }
 
-    /// Origin choice of that setting, borrowed like `internationalSymbol`.
-    /// Empty when the setting has no choice.
+    /// Borrows the origin choice; empty when none is defined.
     pub fn choice(self: Dataset) []const u8 {
         return cString(self.raw.choice[0..]);
     }
 
-    /// Point-group symbol of the crystal class, borrowed like
-    /// `internationalSymbol`.
+    /// Borrows the point-group symbol until `deinit`.
     pub fn pointgroupSymbol(self: Dataset) []const u8 {
         return cString(self.raw.pointgroup_symbol[0..]);
     }
 
-    /// Change of basis from the input cell to the conventional setting, copied
-    /// by value from the dataset and therefore independent of `deinit`.
+    /// Returns the input-to-standard-setting basis change by value.
     pub fn transformationMatrix(self: Dataset) [3][3]f64 {
         return self.raw.transformation_matrix;
     }
@@ -87,8 +62,7 @@ pub const Dataset = struct {
         return self.raw.origin_shift;
     }
 
-    /// Number of atoms in the input cell, which is what every per-atom borrow
-    /// below is indexed by.
+    /// Number of input atoms, which indexes per-atom borrows.
     pub fn atomCount(self: Dataset) usize {
         return err.checkedCount(self.raw.n_atoms);
     }
@@ -107,45 +81,37 @@ pub const Dataset = struct {
         };
     }
 
-    /// Borrowed Wyckoff identifiers, one per input atom. Invalid after
-    /// `deinit`.
+    /// Borrows one Wyckoff identifier per input atom until `deinit`.
     pub fn wyckoffs(self: Dataset) []const c_int {
         return ffi.borrow(c_int, self.raw.wyckoffs, self.atomCount());
     }
 
-    /// Borrowed site-symmetry symbols, one per input atom, each NUL-terminated
-    /// inside its own 7-character slot. Invalid after `deinit`.
+    /// Borrows one NUL-terminated, 7-byte site-symmetry slot per atom.
     pub fn siteSymmetrySymbols(self: Dataset) []const [7]u8 {
         return ffi.borrow([7]u8, self.raw.site_symmetry_symbols, self.atomCount());
     }
 
-    /// Borrowed symmetry-equivalence classes, one per input atom. Invalid
-    /// after `deinit`.
+    /// Borrows one symmetry-equivalence class per input atom until `deinit`.
     pub fn equivalentAtoms(self: Dataset) []const c_int {
         return ffi.borrow(c_int, self.raw.equivalent_atoms, self.atomCount());
     }
 
-    /// Borrowed crystallographic orbits, one per input atom. Invalid after
-    /// `deinit`.
+    /// Borrows one crystallographic orbit per input atom until `deinit`.
     pub fn crystallographicOrbits(self: Dataset) []const c_int {
         return ffi.borrow(c_int, self.raw.crystallographic_orbits, self.atomCount());
     }
 
-    /// Lattice of the primitive cell the input cell maps onto, copied by value.
-    /// `mappingToPrimitive` indexes that cell, not this struct.
+    /// Returns the primitive-cell lattice by value; `mappingToPrimitive` indexes it.
     pub fn primitiveLattice(self: Dataset) [3][3]f64 {
         return self.raw.primitive_lattice;
     }
 
-    /// Borrowed map from input atoms to primitive-cell atoms, one per input
-    /// atom. Invalid after `deinit`.
+    /// Borrows the input-to-primitive atom map until `deinit`.
     pub fn mappingToPrimitive(self: Dataset) []const c_int {
         return ffi.borrow(c_int, self.raw.mapping_to_primitive, self.atomCount());
     }
 
-    /// Number of atoms in the standardised cell, which is what
-    /// `standardTypes`, `standardPositions` and `standardMappingToPrimitive`
-    /// are indexed by.
+    /// Number of atoms in the standardised cell; indexes its per-atom arrays.
     pub fn standardAtomCount(self: Dataset) usize {
         return err.checkedCount(self.raw.n_std_atoms);
     }
@@ -155,8 +121,7 @@ pub const Dataset = struct {
         return self.raw.std_lattice;
     }
 
-    /// Rotation that takes the input frame to the standardised frame, copied
-    /// by value.
+    /// Returns the input-to-standardised-frame rotation by value.
     pub fn standardRotationMatrix(self: Dataset) [3][3]f64 {
         return self.raw.std_rotation_matrix;
     }
@@ -166,51 +131,35 @@ pub const Dataset = struct {
         return ffi.borrow(c_int, self.raw.std_types, self.standardAtomCount());
     }
 
-    /// Borrowed fractional positions of the standardised cell. Invalid after
-    /// `deinit`.
+    /// Borrows standardised fractional positions until `deinit`.
     pub fn standardPositions(self: Dataset) []const [3]f64 {
         return ffi.borrow([3]f64, self.raw.std_positions, self.standardAtomCount());
     }
 
-    /// Borrowed map from standardised-cell atoms to primitive-cell atoms.
-    /// Invalid after `deinit`.
+    /// Borrows the standardised-to-primitive atom map until `deinit`.
     pub fn standardMappingToPrimitive(self: Dataset) []const c_int {
         return ffi.borrow(c_int, self.raw.std_mapping_to_primitive, self.standardAtomCount());
     }
 };
 
-/// Upstream declares these fields as plain `char[N]` arrays, which
-/// `addTranslateC` renders as `[N]u8` with no sentinel, so `std.mem.span`
-/// does not apply to them.  They are NUL-terminated by C convention, so the
-/// string ends at the first zero byte; an unterminated array is returned in
-/// full rather than silently truncated at some other length.
+/// Reads a translated fixed-width C char array to its first NUL, or returns it whole.
 fn cString(field: []const u8) []const u8 {
     const end = std.mem.indexOfScalar(u8, field, 0) orelse field.len;
     return field[0..end];
 }
 
-/// Choices `standardizeCell` passes to `spgat_standardize_cell`. Read once, at
-/// the start of the call; changing the struct afterwards changes nothing.
-///
-/// The angle tolerance is not one of them because the facade always passes
-/// `-1.0`, the sentinel the upstream `spg_standardize_cell` wrapper passes and
-/// therefore the library's own default (src/spglib.c:795-801).
+/// Options for `standardizeCell`; the facade always uses spglib's default angle tolerance.
 pub const StandardizeOptions = struct {
     /// True reduces to a primitive cell, false idealises to a conventional one.
     to_primitive: bool = true,
     /// Skip the idealisation step when producing a primitive cell.
     no_idealize: bool = false,
-    /// Symmetry tolerance in Cartesian coordinates. Must be positive;
-    /// anything else is `error.NonPositiveSymprec` before the C call.
+    /// Positive Cartesian symmetry tolerance; invalid values return `NonPositiveSymprec`.
     symprec: f64,
 };
 
-/// Symmetry search at the default angle tolerance, `spg_get_dataset`.
-///
-/// Returns a dataset the caller owns and releases with `Dataset.deinit`; on
-/// failure nothing is allocated and `lastErrorCode` carries the status spglib
-/// recorded. `cell` is read for the duration of the call only: spglib copies
-/// what it needs, so the cell may be released as soon as the call returns.
+/// Searches the default setting and returns an owned dataset; release it with `Dataset.deinit`.
+/// Borrows cell slices for the call; failure returns spglib's recorded error.
 pub fn getDataset(cell: Cell, symprec: f64) (err.Error || err.InputError)!Dataset {
     try cell.validate(symprec);
     return fromRaw(c.spg_get_dataset(
@@ -222,18 +171,8 @@ pub fn getDataset(cell: Cell, symprec: f64) (err.Error || err.InputError)!Datase
     ));
 }
 
-/// Symmetry search pinned to a specific Hall number,
-/// `spg_get_dataset_with_hall_number`.
-///
-/// A Hall number of 0 selects the same search `getDataset` runs: upstream
-/// documents it as "hall_number = 0 gives the same as spg_get_dataset"
-/// (include/spglib.h:232-236), so 0 is a valid argument here rather than an
-/// out-of-range one. Every other number is passed through unchanged and
-/// upstream decides whether it names a setting; a Hall number outside the
-/// database comes back as the search failure spglib recorded, not as a
-/// facade-level range check.
-///
-/// Owns its result exactly as `getDataset` does.
+/// Searches a Hall setting; 0 selects the default search, other values go to spglib unchanged.
+/// Returns an owned dataset; invalid settings return spglib's recorded error.
 pub fn getDatasetWithHallNumber(
     cell: Cell,
     hall_number: c_int,
@@ -250,12 +189,8 @@ pub fn getDatasetWithHallNumber(
     ));
 }
 
-/// Symmetry search with an explicit angle tolerance, `spgat_get_dataset`.
-///
-/// `angle_tolerance` is a distance between lattice directions in degrees, not
-/// a Cartesian tolerance; `-1.0` is the sentinel the `spg_get_dataset`
-/// wrapper passes and therefore the library default. Owns its result exactly as
-/// `getDataset` does.
+/// Searches with an angle tolerance in degrees; `-1.0` selects spglib's default.
+/// Returns an owned dataset; cell slices are borrowed for the call and failures return spglib's error.
 pub fn getDatasetWithAngleTolerance(
     cell: Cell,
     symprec: f64,
@@ -272,27 +207,14 @@ pub fn getDatasetWithAngleTolerance(
     ));
 }
 
-/// Takes ownership of a dataset pointer, or reports the failure spglib
-/// recorded. The three `spg_get_dataset` entry points return NULL on failure.
+/// Takes a successful dataset pointer or returns spglib's recorded error.
 fn fromRaw(raw: anytype) (err.Error || err.InputError)!Dataset {
     if (ffi.isNull(raw)) return err.lastError();
     return .{ .raw = ffi.single(c.SpglibDataset, raw) };
 }
 
-/// Standardises a cell into a primitive or conventional cell,
-/// `spgat_standardize_cell`.
-///
-/// The result is allocated from `allocator`, which is stored on it and must
-/// stay valid until `OwnedCell.deinit`. `cell` is read and never modified:
-/// its slices are copied into fresh buffers first, so they may be released as
-/// soon as the call returns.
-///
-/// The buffers are sized at four times the input atom count, the growth bound
-/// upstream grows to, and trimmed to the count spglib returns; when the
-/// allocator cannot shrink a buffer the oversized allocation is kept, so
-/// `deinit` is correct either way. spglib is given no capacity to check, so
-/// this wrapper owns that bound. On failure nothing is returned and both
-/// buffers are released.
+/// Standardises a copy of `cell` into allocator-owned buffers; release the result with `OwnedCell.deinit`.
+/// Uses up to four slots per input atom; failure frees both buffers and returns an error.
 pub fn standardizeCell(
     allocator: std.mem.Allocator,
     cell: Cell,
@@ -324,10 +246,8 @@ pub fn standardizeCell(
     return result;
 }
 
-/// Reduces a cell to its primitive cell: `standardizeCell` with
-/// `to_primitive` set and idealisation left on, which is the same
-/// `spgat_standardize_cell` call rather than `spgat_find_primitive`. Ownership,
-/// the four-times bound and the failure behaviour are `standardizeCell`'s.
+/// Returns a primitive cell via `standardizeCell`, with idealisation enabled.
+/// Ownership, buffer bound, and errors match that function.
 pub fn findPrimitive(
     allocator: std.mem.Allocator,
     cell: Cell,
@@ -336,13 +256,8 @@ pub fn findPrimitive(
     return standardizeCell(allocator, cell, .{ .to_primitive = true, .symprec = symprec });
 }
 
-/// Symmetrises a cell into its Bravais lattice, `spgat_refine_cell` with the
-/// default angle tolerance.
-///
-/// The buffers are sized as upstream requires, four times the input atom count
-/// (include/spglib.h:463-471 is the only place the library states it), and are
-/// trimmed to the returned count. Ownership and the failure behaviour are
-/// `standardizeCell`'s.
+/// Refines the cell to its Bravais lattice with the default angle tolerance.
+/// Returns allocator-owned buffers; uses four slots per input atom and frees them on failure.
 pub fn refineCell(
     allocator: std.mem.Allocator,
     cell: Cell,
@@ -372,19 +287,14 @@ pub fn refineCell(
     return result;
 }
 
-/// Reduces `lattice` in place, `spg_niggli_reduce`.
-///
-/// The lattice is modified only when the reduction succeeds; on
-/// `error.NonPositiveSymprec` or a spglib failure it is left as the caller
-/// passed it. A degenerate lattice has no reduced form, so that is the
-/// failure to expect from one whose vectors are coplanar.
+/// Reduces `lattice` in place; `symprec` must be positive.
+/// Leaves the lattice unchanged on invalid input or spglib failure.
 pub fn niggliReduce(lattice: *[3][3]f64, symprec: f64) (err.Error || err.InputError)!void {
     if (!(symprec > 0)) return error.NonPositiveSymprec;
     if (c.spg_niggli_reduce(lattice, symprec) == 0) return err.lastError();
 }
 
-/// Trims a buffer to its used length, keeping the original when the allocator
-/// cannot shrink it. Ownership stays with the same allocator either way.
+/// Shrinks to the used length when possible; the slice remains allocator-owned either way.
 fn trim(comptime T: type, allocator: std.mem.Allocator, slice: []T, len: usize) []T {
     if (len == slice.len) return slice;
     return allocator.realloc(slice, len) catch slice;

@@ -1,9 +1,5 @@
-# Canonical development environment for this SDK is devenv: `devenv shell`, or
-# direnv through `.envrc`.
-#
-# The lock file (`devenv.lock`) belongs to the integration driver, which records
-# the resolved hashes. This file pins the input by revision rather than by
-# branch, so a `devenv shell` in a month is not a different nixpkgs.
+# Use devenv or direnv via `.envrc`.
+# Pin nixpkgs by revision; the integration driver owns the lock file.
 inputs:
   nixpkgs:
     url: github:cachix/devenv-nixpkgs/c2f38fe7f9e04d9aadd354d380f2bd40531d9737

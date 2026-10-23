@@ -1,34 +1,16 @@
-// Zig facade for spglib: C status codes.
-//
-// include/spglib.h declares `SpglibError` with the values mirrored by
-// `ErrorCode` below. Nothing here replaces an upstream failure with a success:
-// every call that reports failure exposes the code spglib stored through
-// `spg_get_error_code`.
-
 const std = @import("std");
 
 const c = @import("c");
 const ffi = @import("ffi.zig");
 
-/// The C type of `SpglibError` as produced by `addTranslateC`. It is an
-/// integer alias on some toolchain versions and a Zig enum on others; every
-/// conversion below goes through this alias so both shapes work.
-///
-/// `@TypeOf` of the call is already the return type, so no `@typeInfo` walk
-/// is needed to recover it: the two shapes differ only in whether
-/// `toRaw`/`fromRaw` use `@enumFromInt`, and that is decided per call site
-/// with `@typeInfo(RawError)`.
+/// Translated return type of `spg_get_error_code`; may be an enum or integer alias.
+/// Conversion helpers support both forms.
 pub const RawError = @TypeOf(c.spg_get_error_code());
 
-/// Mirrors `SpglibError` from include/spglib.h, one tag per enumerator, in the
-/// same order and with the same numeric values.
-///
-/// A recorded code is a per-thread, cleared-by-success value; `lastErrorCode`
-/// owns that lifetime. It is a diagnostic behind the error a facade call
-/// returned, not a second result channel.
+/// Mirrors spglib's status codes.
+/// The recorded value is per-thread and cleared by a successful call.
 pub const ErrorCode = enum(c_int) {
-    /// The last call succeeded. Overwritten by every successful entry point,
-    /// `getVersion` included.
+    /// A successful spglib call; every successful entry point clears this code.
     success = 0,
     spacegroupSearchFailed = 1,
     cellStandardizationFailed = 2,
@@ -38,17 +20,11 @@ pub const ErrorCode = enum(c_int) {
     niggliFailed = 6,
     delaunayFailed = 7,
     arraySizeShortage = 8,
-    /// Recorded when a call signalled failure without naming a cause, and the
-    /// value any code outside the table is reported as. `errorMessage` has no
-    /// text for it: `spg_get_error_message` breaks on the `SPGERR_NONE`
-    /// sentinel before it compares its argument (src/spglib.c:214-228).
+    /// Used when a call fails without a known code; no message is available.
     none = 9,
 };
 
-/// Failure codes returned by the spglib entry points, one error per
-/// `ErrorCode` enumerator other than `success`. `None` is what spglib reports
-/// when a call signals failure without recording a specific code, and is
-/// deliberately not folded into success.
+/// Facade errors for spglib failures; `None` represents a failure without a specific code.
 pub const Error = error{
     SpacegroupSearchFailed,
     CellStandardizationFailed,
@@ -61,9 +37,7 @@ pub const Error = error{
     None,
 };
 
-/// Failures detected before control reaches C. These never replace an spglib
-/// status code; they exist because the C API takes `int num_atom`, raw pointers
-/// and unchecked doubles, which a Zig slice cannot express.
+/// Input errors detected before calling spglib.
 pub const InputError = error{
     /// The cell has no atoms.
     EmptyCell,
@@ -79,53 +53,28 @@ pub const InputError = error{
     HallNumberOutOfRange,
     /// A UNI number is outside the 1..1651 range the database covers.
     UniNumberOutOfRange,
-    /// A k-point mesh entry is not a positive integer, or is too large for the
-    /// `2 * mesh[i]` the doubled-mesh reduction computes (src/kgrid.c:125).
+    /// Mesh entry is non-positive or cannot be doubled safely by spglib.
     MeshOutOfRange,
-    /// A grid address component does not fit the `address[i] * 2` the
-    /// doubled-mesh conversion computes (src/kgrid.c:39). This is not a bound on
-    /// the mesh: an address outside the mesh names the point it folds onto.
+    /// Grid address cannot be doubled safely; addresses outside the mesh may still fold.
     GridAddressOutOfRange,
     /// `symprec` is not positive; rejected before calling spglib.
     NonPositiveSymprec,
-    /// A tensor rank is outside the 0..1 range spglib implements. `SiteTensorType`
-    /// has only `NOSPIN`, `COLLINEAR` and `NONCOLLINEAR` (src/cell.h:10-14) and
-    /// `cel_alloc_cell` allocates tensor storage for nothing else, so a higher
-    /// rank would reach an uninitialised `cell->tensors`.
+    /// Tensor rank is outside spglib's supported 0..1 range.
     TensorRankOutOfRange,
 };
 
-/// Reads the code spglib recorded for the most recent failing call on this
-/// thread.
-///
-/// `spglib_error_code` is `static thread_local` (src/spglib.c:50) and every
-/// successful entry point overwrites it with `SPGLIB_SUCCESS`, including the
-/// six functions behind `getVersion`. The value is therefore meaningful only
-/// immediately after a call that failed, it is per-thread, and a later
-/// successful call in the same thread clears it. The error a facade call
-/// returns is the reliable channel; this is the diagnostic behind it.
+/// Returns the calling thread's recorded error; any successful call clears it.
+/// Use after a facade failure; the returned Zig error is the primary channel.
 pub fn lastErrorCode() ErrorCode {
     return fromRaw(c.spg_get_error_code());
 }
 
-/// Converts the recorded code into a Zig error. `success` maps to `error.None`
-/// so that a call which returned failure without recording a code is never
-/// silently reported as success. It inherits `lastErrorCode`'s per-thread,
-/// cleared-by-success lifetime.
+/// Converts the recorded code to a Zig error; an unrecorded failure maps to `error.None`.
 pub fn lastError() Error {
     return toError(lastErrorCode());
 }
 
-/// The spglib message for `code`, borrowed from static storage owned by the
-/// library and valid for the lifetime of the process.
-///
-/// Null when spglib has no message for the code. `spg_get_error_message`
-/// (src/spglib.c:214-228) walks the table and breaks on the `{SPGERR_NONE,
-/// ""}` sentinel at index 9 before it compares the argument, so `SPGERR_NONE`
-/// and any code outside the table return NULL. `SPGERR_NONE` is a recorded
-/// code, not a hypothetical: a magnetic dataset that cannot be assembled sets
-/// it (src/spglib.c:1247-1252), and the facade maps an unrecognised recorded
-/// code onto it.
+/// Borrows spglib's process-lifetime message, or returns null when none exists.
 pub fn errorMessage(code: ErrorCode) ?[]const u8 {
     return ffi.spanOrNull(c.spg_get_error_message(toRaw(code)));
 }
@@ -164,17 +113,12 @@ fn fromRaw(raw: RawError) ErrorCode {
 
 fn toRaw(code: ErrorCode) RawError {
     const value: std.meta.Int(.unsigned, @bitSizeOf(RawError)) = @intCast(@intFromEnum(code));
-    // The translation yields an integer alias or a fieldless enum; only one of
-    // the two branches is semantically analysed.
+    // Translate-c may represent the C error type as an enum or integer.
     if (@typeInfo(RawError) == .@"enum") return @enumFromInt(value);
     return @intCast(value);
 }
 
-/// Converts a C `int` count to a slice length. A negative count would mean the
-/// library wrote an inconsistent dataset, which is a hard failure rather than
-/// something to clamp: the check is a plain comparison rather than
-/// `std.debug.assert`, because an assert is compiled out in ReleaseFast and
-/// would leave `@intCast` to reinterpret a negative value as a huge length.
+/// Converts a non-negative C count to `usize`; panics if spglib returns a negative count.
 pub fn checkedCount(value: c_int) usize {
     if (value < 0) @panic("spglib reported a negative count");
     return @intCast(value);
