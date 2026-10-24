@@ -32,12 +32,10 @@ All other bytes under `src/`, `include/` and `database/` match the pin. `.gitign
 
 ## Consumption
 
-Use a local path dependency; no published URL or content hash is confirmed:
+Add spglib to the consumer's `build.zig.zon`:
 
-```zon
-.dependencies = .{
-    .spglib = .{ .path = "../spglib" },
-},
+```sh
+zig fetch --save git+https://github.com/CoffeeImpliesCode/spglib#v2.7.0
 ```
 
 `dep.module("spglib")` exports the facade and links the in-tree library. In vendored mode, `dep.artifact("spglib")` is the native library artifact and carries the installed header include path for C consumers. The installed C interface is `include/spglib.h`, `include/spglib/version.h` and `lib/pkgconfig/spglib.pc`; library files are `libspglib.a` or `libspglib.so` (with versioned links for the shared build).
